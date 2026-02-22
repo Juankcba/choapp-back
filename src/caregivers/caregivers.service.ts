@@ -15,7 +15,23 @@ export class CaregiversService {
     }
 
     async updateProfile(userId: string, data: any) {
-        return this.prisma.caregiver.update({ where: { userId }, data });
+        const mappedData: any = {};
+
+        if (data.bio !== undefined) mappedData.bio = data.bio;
+        if (data.experience !== undefined) mappedData.experience = data.experience;
+        if (data.hourlyRate !== undefined) mappedData.hourlyRate = data.hourlyRate;
+        if (data.specialties) mappedData.specialties = data.specialties;
+        if (data.locationLat !== undefined) mappedData.locationLat = data.locationLat;
+        if (data.locationLng !== undefined) mappedData.locationLng = data.locationLng;
+        if (data.currentLocation?.lat !== undefined) mappedData.locationLat = data.currentLocation.lat;
+        if (data.currentLocation?.lng !== undefined) mappedData.locationLng = data.currentLocation.lng;
+        if (data.isAvailable !== undefined) mappedData.isAvailable = data.isAvailable;
+
+        return this.prisma.caregiver.upsert({
+            where: { userId },
+            update: mappedData,
+            create: { userId, ...mappedData },
+        });
     }
 
     async updateAvailability(userId: string, isAvailable: boolean) {
