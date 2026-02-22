@@ -1,7 +1,8 @@
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, Post, Body, Req, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
 import { Public } from './decorators';
+import { AuthGuard } from '@nestjs/passport';
 
 @Controller('auth')
 export class AuthController {
@@ -30,5 +31,22 @@ export class AuthController {
             return { valid: false };
         }
         return { valid: true, user };
+    }
+
+    @Public()
+    @Post('social-login')
+    async socialLogin(
+        @Body() body: { email: string; name?: string; image?: string },
+    ) {
+        return this.authService.socialLogin(body);
+    }
+
+    @Post('set-role')
+    @UseGuards(AuthGuard('jwt'))
+    async setRole(
+        @Req() req: any,
+        @Body() body: { role: 'family' | 'caregiver' },
+    ) {
+        return this.authService.setRole(req.user.userId, body.role);
     }
 }

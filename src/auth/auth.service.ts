@@ -39,7 +39,6 @@ export class AuthService {
                 },
             });
 
-            // Create role-specific profile
             if (dto.role === 'caregiver') {
                 await this.prisma.caregiver.create({ data: { userId: user.id } });
             } else if (dto.role === 'family') {
@@ -49,7 +48,7 @@ export class AuthService {
             const payload = { email: user.email, sub: user.id, role: user.role };
             return {
                 access_token: this.jwtService.sign(payload),
-                user: { id: user.id, email: user.email, role: user.role },
+                user: { id: user.id, email: user.email, role: user.role, name: user.name },
             };
         } catch (error) {
             if (error instanceof ConflictException) throw error;
@@ -81,7 +80,65 @@ export class AuthService {
         const payload = { email: user.email, sub: user.id, role: user.role };
         return {
             access_token: this.jwtService.sign(payload),
-            user: { id: user.id, email: user.email, role: user.role },
+            user: { id: user.id, email: user.email, role: user.role, name: user.name },
+        };
+    }
+
+    async socialLogin(data: { email: string; name?: string; image?: string }) {
+        let user = await this.prisma.user.findUnique({
+            where: { email: data.email },
+            include: { family: true, caregiver: true },
+        });
+
+        if (!user) {
+            user = await this.prisma.user.create({
+                data: {
+                    email: data.email,
+                    name: data.name,
+                    image: data.image,
+                    role: 'pending',
+                },
+                include: { family: true, caregiver: true },
+            });
+        } else {
+            await this.prisma.user.update({
+                where: { id: user.id },
+                data: { lastLogin: new Date() },
+            });
+        }
+
+        const hasProfile = user.family || user.caregiver;
+        const role = hasProfile ? user.role : 'pending';
+
+        const payload = { email: user.email, sub: user.id, role };
+        return {
+            access_token: this.jwtService.sign(payload),
+            user: { id: user.id, email: user.email, role, name: user.name },
+        };
+    }
+
+    async setRole(userId: string, role: 'family' | 'caregiver') {
+        const user = await this.prisma.user.update({
+            where: { id: userId },
+            data: { role },
+        });
+
+        if (role === 'family') {
+            const existing = await this.prisma.family.findUnique({ where: { userId } });
+            if (!existing) {
+                await this.prisma.family.create({ data: { userId } });
+            }
+        } else if (role === 'caregiver') {
+            const existing = await this.prisma.caregiver.findUnique({ where: { userId } });
+            if (!existing) {
+                await this.prisma.caregiver.create({ data: { userId } });
+            }
+        }
+
+        const payload = { email: user.email, sub: user.id, role: user.role };
+        return {
+            access_token: this.jwtService.sign(payload),
+            user: { id: user.id, email: user.email, role: user.role, name: user.name },
         };
     }
 
