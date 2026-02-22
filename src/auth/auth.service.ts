@@ -95,6 +95,11 @@ export class AuthService {
     }
 
     async socialLogin(data: { email: string; name?: string; image?: string }) {
+        // Parse firstName / lastName from Google display name
+        const nameParts = (data.name || '').trim().split(/\s+/);
+        const firstName = nameParts[0] || '';
+        const lastName = nameParts.slice(1).join(' ') || '';
+
         let user = await this.prisma.user.findUnique({
             where: { email: data.email },
             include: { family: true, caregiver: true },
@@ -105,6 +110,8 @@ export class AuthService {
                 data: {
                     email: data.email,
                     name: data.name,
+                    firstName,
+                    lastName,
                     image: data.image,
                     role: 'pending',
                 },
@@ -114,9 +121,16 @@ export class AuthService {
             // Send welcome email for new social login users
             this.mailService.sendWelcomeEmail(data.email, data.name || 'Usuario');
         } else {
+            // Update existing user: fill missing fields + update lastLogin
+            const updateData: any = { lastLogin: new Date() };
+            if (!user.firstName && firstName) updateData.firstName = firstName;
+            if (!user.lastName && lastName) updateData.lastName = lastName;
+            if (!user.name && data.name) updateData.name = data.name;
+            if (!user.image && data.image) updateData.image = data.image;
+
             await this.prisma.user.update({
                 where: { id: user.id },
-                data: { lastLogin: new Date() },
+                data: updateData,
             });
         }
 
@@ -126,7 +140,7 @@ export class AuthService {
         const payload = { email: user.email, sub: user.id, role };
         return {
             access_token: this.jwtService.sign(payload),
-            user: { id: user.id, email: user.email, role, name: user.name },
+            user: { id: user.id, email: user.email, role, name: user.name || data.name },
         };
     }
 
