@@ -19,9 +19,15 @@ export class AdminService {
     }
 
     async getPendingCaregivers() {
+        // Get all valid user IDs to avoid orphaned caregiver records
+        const validUserIds = (await this.prisma.user.findMany({ select: { id: true } })).map(u => u.id);
+
         return this.prisma.caregiver.findMany({
-            where: { verificationStatus: 'pending' },
-            include: { user: { select: { email: true, firstName: true, lastName: true, phone: true, createdAt: true } } },
+            where: {
+                verificationStatus: 'pending',
+                userId: { in: validUserIds },
+            },
+            include: { user: { select: { email: true, firstName: true, lastName: true, name: true, phone: true, createdAt: true } } },
             orderBy: { createdAt: 'desc' },
         });
     }
