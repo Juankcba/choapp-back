@@ -99,6 +99,45 @@ export class MailService {
     }
   }
 
+  async sendServiceNearbyEmail(
+    email: string, name: string,
+    details: { serviceType: string; patientName: string; distance: number; scheduledDate: Date | null; serviceId: string },
+  ) {
+    try {
+      const dateStr = details.scheduledDate
+        ? new Date(details.scheduledDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+        : 'A coordinar';
+
+      await this.transporter.sendMail({
+        from: `"${this.fromName}" <${this.fromEmail}>`,
+        to: email,
+        subject: `🔔 Nuevo servicio cerca tuyo - ${details.serviceType}`,
+        html: this.baseLayout(`
+          <h2 style="margin:0 0 16px;color:#111827;font-size:22px;">¡Hola ${name}!</h2>
+          <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
+            Hay un nuevo servicio de <strong>${details.serviceType}</strong> que necesita un cuidador cerca de tu ubicación.
+          </p>
+          <div style="background:#f3f4f6;border-radius:12px;padding:20px;margin:0 0 24px;">
+            <p style="margin:0 0 8px;color:#374151;font-size:14px;"><strong>📋 Servicio:</strong> ${details.serviceType}</p>
+            <p style="margin:0 0 8px;color:#374151;font-size:14px;"><strong>👤 Paciente:</strong> ${details.patientName}</p>
+            <p style="margin:0 0 8px;color:#374151;font-size:14px;"><strong>📍 Distancia:</strong> ${details.distance} km de tu ubicación</p>
+            <p style="margin:0;color:#374151;font-size:14px;"><strong>📅 Fecha:</strong> ${dateStr}</p>
+          </div>
+          <div style="text-align:center;margin:0 0 24px;">
+            <a href="${this.configService.get('FRONTEND_URL', 'http://localhost:3000')}/caregiver/dashboard" style="display:inline-block;background:#6366f1;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:600;font-size:15px;">
+              Ver Servicio
+            </a>
+          </div>
+          <p style="margin:0;color:#9ca3af;font-size:13px;text-align:center;">
+            Si no te interesa, puedes ignorar este email.
+          </p>`),
+      });
+      this.logger.log(`Service nearby email sent to ${email}`);
+    } catch (error) {
+      this.logger.error(`Failed to send service nearby email to ${email}`, error);
+    }
+  }
+
   // ─── HTML Templates ──────────────────────────────────
 
   private baseLayout(content: string): string {

@@ -1,9 +1,15 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { MatchingService } from '../matching/matching.service';
 
 @Injectable()
 export class ServicesService {
-    constructor(private prisma: PrismaService) { }
+    private readonly logger = new Logger(ServicesService.name);
+
+    constructor(
+        private prisma: PrismaService,
+        private matchingService: MatchingService,
+    ) { }
 
     async create(userId: string, data: any) {
         const family = await this.prisma.family.findUnique({ where: { userId } });
@@ -26,6 +32,15 @@ export class ServicesService {
                 locationLng: data.locationLng || family.locationLng,
             },
         });
+
+        // 🔔 Trigger async matching — find and notify nearby caregivers
+        this.matchingService.notifyNearbyCaregivers(service.id)
+            .then((result) => {
+                this.logger.log(`Matching complete for service ${service.id}: ${result.notified} caregivers notified`);
+            })
+            .catch((err) => {
+                this.logger.error(`Matching failed for service ${service.id}`, err);
+            });
 
         return service;
     }
@@ -72,5 +87,36 @@ export class ServicesService {
                 status: 'accepted',
             },
         });
+    }
+
+    async getNotificationsForCaregiver(userId: string) {
+        const caregiver = await this.prisma.caregiver.findUnique({ where: { userId } });
+        if (!caregiver) throw new NotFoundException('Caregiver not found');
+
+        const notifications = await this.prisma.serviceNotification.findMany({
+            where: {
+                caregiverId: caregiver.id,
+                status: 'pending',
+            },
+            include: {
+                service: {
+                    include: {
+                        family: {
+                            include: { user: { select: { firstName: true, lastName: true, name: true } } },
+                        },
+                    },
+                },
+            },
+            orderBy: { createdAt: 'desc' },
+        });
+
+        return notifications;
+    }
+
+    async respondToService(userId: string, serviceId: string, accepted: boolean) {
+        const caregiver = await this.prisma.caregiver.findUnique({ where: { userId } });
+        if (!caregiver) throw new NotFoundException('Caregiver not found');
+
+        return this.matchingService.respondToService(caregiver.id, serviceId, accepted);
     }
 }
