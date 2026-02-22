@@ -2,6 +2,7 @@ import {
     Injectable,
     ConflictException,
     UnauthorizedException,
+    InternalServerErrorException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
@@ -16,39 +17,47 @@ export class AuthService {
     ) { }
 
     async register(dto: RegisterDto) {
-        const existing = await this.prisma.user.findUnique({
-            where: { email: dto.email },
-        });
-        if (existing) {
-            throw new ConflictException('Email already exists');
+        try {
+            const existing = await this.prisma.user.findUnique({
+                where: { email: dto.email },
+            });
+            if (existing) {
+                throw new ConflictException('Email already exists');
+            }
+
+            const hashedPassword = await bcrypt.hash(dto.password, 10);
+
+            const user = await this.prisma.user.create({
+                data: {
+                    email: dto.email,
+                    password: hashedPassword,
+                    phone: dto.phone,
+                    firstName: dto.firstName,
+                    lastName: dto.lastName,
+                    name: `${dto.firstName} ${dto.lastName}`,
+                    role: dto.role,
+                },
+            });
+
+            // Create role-specific profile
+            if (dto.role === 'caregiver') {
+                await this.prisma.caregiver.create({ data: { userId: user.id } });
+            } else if (dto.role === 'family') {
+                await this.prisma.family.create({ data: { userId: user.id } });
+            }
+
+            const payload = { email: user.email, sub: user.id, role: user.role };
+            return {
+                access_token: this.jwtService.sign(payload),
+                user: { id: user.id, email: user.email, role: user.role },
+            };
+        } catch (error) {
+            if (error instanceof ConflictException) throw error;
+            console.error('Register error:', error);
+            throw new InternalServerErrorException(
+                `Registration failed: ${error.message}`,
+            );
         }
-
-        const hashedPassword = await bcrypt.hash(dto.password, 10);
-
-        const user = await this.prisma.user.create({
-            data: {
-                email: dto.email,
-                password: hashedPassword,
-                phone: dto.phone,
-                firstName: dto.firstName,
-                lastName: dto.lastName,
-                name: `${dto.firstName} ${dto.lastName}`,
-                role: dto.role,
-            },
-        });
-
-        // Create role-specific profile
-        if (dto.role === 'caregiver') {
-            await this.prisma.caregiver.create({ data: { userId: user.id } });
-        } else if (dto.role === 'family') {
-            await this.prisma.family.create({ data: { userId: user.id } });
-        }
-
-        const payload = { email: user.email, sub: user.id, role: user.role };
-        return {
-            access_token: this.jwtService.sign(payload),
-            user: { id: user.id, email: user.email, role: user.role },
-        };
     }
 
     async login(dto: LoginDto) {
