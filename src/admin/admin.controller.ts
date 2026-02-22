@@ -5,8 +5,10 @@ import {
     Param,
     Body,
     UseGuards,
+    Query,
 } from '@nestjs/common';
 import { AdminService } from './admin.service';
+import { MailService } from '../mail/mail.service';
 import { Roles } from '../auth/decorators';
 import { RolesGuard } from '../auth/roles.guard';
 
@@ -14,7 +16,10 @@ import { RolesGuard } from '../auth/roles.guard';
 @UseGuards(RolesGuard)
 @Roles('admin')
 export class AdminController {
-    constructor(private readonly adminService: AdminService) { }
+    constructor(
+        private readonly adminService: AdminService,
+        private readonly mailService: MailService,
+    ) { }
 
     @Get('stats')
     async getStats() {
@@ -37,5 +42,10 @@ export class AdminController {
     @Get('services/active')
     async getActiveServices() {
         return this.adminService.getActiveServices();
+    }
+
+    @Post('test-email')
+    async sendTestEmail(@Body() body: { email: string }) {
+        return this.mailService.sendTestEmail(body.email);
     }
 }
