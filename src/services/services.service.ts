@@ -198,5 +198,29 @@ export class ServicesService {
 
         return this.matchingService.respondToService(caregiver.id, serviceId, accepted);
     }
+
+    async getInterestedForCaregiver(userId: string) {
+        const caregiver = await this.prisma.caregiver.findUnique({ where: { userId } });
+        if (!caregiver) throw new NotFoundException('Caregiver not found');
+
+        const notifications = await this.prisma.serviceNotification.findMany({
+            where: {
+                caregiverId: caregiver.id,
+                status: 'interested',
+            },
+            include: {
+                service: {
+                    include: {
+                        family: {
+                            include: { user: { select: { firstName: true, lastName: true, name: true } } },
+                        },
+                    },
+                },
+            },
+            orderBy: { respondedAt: 'desc' },
+        });
+
+        return notifications;
+    }
 }
 

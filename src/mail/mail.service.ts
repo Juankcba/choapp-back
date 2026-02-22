@@ -231,6 +231,40 @@ export class MailService {
         </div>`);
   }
 
+  async sendChatNotificationEmail(
+    email: string,
+    recipientName: string,
+    senderName: string,
+    messageContent: string,
+    serviceId: string,
+  ): Promise<void> {
+    try {
+      await this.transporter.sendMail({
+        from: `"${this.fromName}" <${this.fromEmail}>`,
+        to: email,
+        subject: `💬 Nuevo mensaje de ${senderName} - CHO`,
+        html: this.baseLayout(`
+          <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
+            Hola <strong>${recipientName}</strong>, tenés un nuevo mensaje de <strong>${senderName}</strong>:
+          </p>
+          <div style="margin:16px 0;padding:16px;background:#f3f4f6;border-radius:8px;border-left:4px solid #0070f3;">
+            <p style="margin:0;color:#1f2937;font-size:15px;line-height:1.6;font-style:italic;">
+              "${messageContent}"
+            </p>
+          </div>
+          <div style="margin:24px 0;text-align:center;">
+            <a href="${this.getFrontendUrl()}/family/chat/${serviceId}"
+               style="display:inline-block;background:#0070f3;color:white;text-decoration:none;padding:12px 32px;border-radius:8px;font-weight:600;font-size:15px;">
+              Responder
+            </a>
+          </div>`),
+      });
+      this.logger.log(`Chat notification email sent to ${email}`);
+    } catch (error) {
+      this.logger.error(`Failed to send chat notification to ${email}`, error);
+    }
+  }
+
   private getFrontendUrl(): string {
     return this.configService.get<string>('FRONTEND_URL') || 'https://cho.bladelink.company';
   }

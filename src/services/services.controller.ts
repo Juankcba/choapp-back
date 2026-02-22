@@ -40,6 +40,12 @@ export class ServicesController {
         return this.servicesService.getNotificationsForCaregiver(req.user.userId);
     }
 
+    @Get('interested')
+    @Roles('caregiver')
+    async getInterestedServices(@Req() req: any) {
+        return this.servicesService.getInterestedForCaregiver(req.user.userId);
+    }
+
     @Get(':id')
     async findById(@Param('id') id: string) {
         return this.servicesService.findById(id);
