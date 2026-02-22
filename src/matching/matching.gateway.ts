@@ -20,8 +20,8 @@ export class MatchingGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     private readonly logger = new Logger(MatchingGateway.name);
 
-    // Track online caregivers: userId → Set<socketId>
-    private onlineCaregivers = new Map<string, Set<string>>();
+    // Track online users: userId → Set<socketId>
+    private onlineUsers = new Map<string, Set<string>>();
     // Reverse map: socketId → userId
     private socketToUser = new Map<string, string>();
 
@@ -32,12 +32,12 @@ export class MatchingGateway implements OnGatewayConnection, OnGatewayDisconnect
     handleDisconnect(client: Socket) {
         const userId = this.socketToUser.get(client.id);
         if (userId) {
-            const sockets = this.onlineCaregivers.get(userId);
+            const sockets = this.onlineUsers.get(userId);
             if (sockets) {
                 sockets.delete(client.id);
                 if (sockets.size === 0) {
-                    this.onlineCaregivers.delete(userId);
-                    this.logger.log(`Caregiver ${userId} went offline`);
+                    this.onlineUsers.delete(userId);
+                    this.logger.log(`User ${userId} went offline`);
                 }
             }
             this.socketToUser.delete(client.id);
@@ -47,41 +47,42 @@ export class MatchingGateway implements OnGatewayConnection, OnGatewayDisconnect
     @SubscribeMessage('register')
     handleRegister(
         @ConnectedSocket() client: Socket,
-        @MessageBody() data: { userId: string },
+        @MessageBody() data: { userId: string; role?: string },
     ) {
         const { userId } = data;
-        if (!this.onlineCaregivers.has(userId)) {
-            this.onlineCaregivers.set(userId, new Set());
+        if (!this.onlineUsers.has(userId)) {
+            this.onlineUsers.set(userId, new Set());
         }
-        this.onlineCaregivers.get(userId)!.add(client.id);
+        this.onlineUsers.get(userId)!.add(client.id);
         this.socketToUser.set(client.id, userId);
 
         // Join personal room for targeted emissions
+        client.join(`user_${userId}`);
+        // Also join role-specific room for backward compatibility
         client.join(`caregiver_${userId}`);
-        this.logger.log(`Caregiver ${userId} registered (socket: ${client.id})`);
+        this.logger.log(`User ${userId} registered (socket: ${client.id})`);
 
         return { status: 'ok' };
     }
 
-    /**
-     * Check if a caregiver is currently online
-     */
+    /** Check if a user is currently online */
     isOnline(userId: string): boolean {
-        return this.onlineCaregivers.has(userId) && this.onlineCaregivers.get(userId)!.size > 0;
+        return this.onlineUsers.has(userId) && this.onlineUsers.get(userId)!.size > 0;
     }
 
-    /**
-     * Emit a new service notification to a specific caregiver
-     */
+    /** Emit to any user (caregiver or family) */
+    emitToUser(userId: string, event: string, data: any) {
+        this.server.to(`user_${userId}`).emit(event, data);
+        this.logger.log(`Emitted '${event}' to user ${userId}`);
+    }
+
+    /** Emit to a caregiver (alias for emitToUser) */
     emitToCaregiver(userId: string, event: string, data: any) {
-        this.server.to(`caregiver_${userId}`).emit(event, data);
-        this.logger.log(`Emitted '${event}' to caregiver ${userId}`);
+        this.emitToUser(userId, event, data);
     }
 
-    /**
-     * Get count of online caregivers
-     */
+    /** Get count of online users */
     getOnlineCount(): number {
-        return this.onlineCaregivers.size;
+        return this.onlineUsers.size;
     }
 }

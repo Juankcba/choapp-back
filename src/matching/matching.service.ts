@@ -202,9 +202,9 @@ export class MatchingService {
     }
 
     /**
-     * Caregiver responds to a service notification
+     * Caregiver expresses interest in a service (does NOT assign them)
      */
-    async respondToService(caregiverId: string, serviceId: string, accepted: boolean) {
+    async respondToService(caregiverId: string, serviceId: string, interested: boolean) {
         const notification = await this.prisma.serviceNotification.findFirst({
             where: { serviceId, caregiverId },
         });
@@ -216,27 +216,91 @@ export class MatchingService {
         await this.prisma.serviceNotification.update({
             where: { id: notification.id },
             data: {
-                status: accepted ? 'accepted' : 'declined',
+                status: interested ? 'interested' : 'declined',
                 respondedAt: new Date(),
             },
         });
 
-        if (accepted) {
-            // Assign caregiver to service
-            await this.prisma.service.update({
+        if (interested) {
+            // Move service to 'matched' if not already
+            const service = await this.prisma.service.findUnique({
                 where: { id: serviceId },
-                data: {
-                    caregiverId,
-                    status: 'accepted',
+                include: {
+                    family: { include: { user: { select: { id: true, email: true, firstName: true, name: true } } } },
                 },
             });
 
-            this.logger.log(`Caregiver ${caregiverId} accepted service ${serviceId}`);
+            if (service && service.status === 'pending') {
+                await this.prisma.service.update({
+                    where: { id: serviceId },
+                    data: { status: 'matched' },
+                });
+            }
+
+            // Get caregiver info for family notification
+            const caregiver = await this.prisma.caregiver.findUnique({
+                where: { id: caregiverId },
+                include: { user: { select: { firstName: true, lastName: true, name: true } } },
+            });
+
+            // Notify family via WebSocket
+            if (service?.family?.user) {
+                const familyUserId = service.family.user.id;
+                const serviceTypeName = this.getServiceTypeName(service.serviceType);
+                const caregiverName = caregiver?.user?.name ||
+                    `${caregiver?.user?.firstName || ''} ${caregiver?.user?.lastName || ''}`.trim() || 'Un cuidador';
+
+                this.matchingGateway.emitToUser(familyUserId, 'caregiver-interested', {
+                    serviceId,
+                    serviceType: serviceTypeName,
+                    caregiverName,
+                    caregiverId,
+                });
+
+                this.logger.log(`Notified family ${familyUserId} about interested caregiver ${caregiverId}`);
+            }
+
+            this.logger.log(`Caregiver ${caregiverId} interested in service ${serviceId}`);
         } else {
             this.logger.log(`Caregiver ${caregiverId} declined service ${serviceId}`);
         }
 
-        return { status: accepted ? 'accepted' : 'declined' };
+        return { status: interested ? 'interested' : 'declined' };
+    }
+
+    /**
+     * Family selects a caregiver from the interested candidates
+     */
+    async selectCaregiver(serviceId: string, caregiverId: string) {
+        // Assign caregiver to service
+        await this.prisma.service.update({
+            where: { id: serviceId },
+            data: {
+                caregiverId,
+                status: 'accepted',
+            },
+        });
+
+        // Mark selected notification as accepted
+        await this.prisma.serviceNotification.updateMany({
+            where: { serviceId, caregiverId },
+            data: { status: 'accepted', respondedAt: new Date() },
+        });
+
+        // Mark all other interested notifications as declined
+        await this.prisma.serviceNotification.updateMany({
+            where: { serviceId, caregiverId: { not: caregiverId }, status: 'interested' },
+            data: { status: 'declined', respondedAt: new Date() },
+        });
+
+        // Notify selected caregiver
+        const caregiver = await this.prisma.caregiver.findUnique({ where: { id: caregiverId } });
+        if (caregiver) {
+            this.matchingGateway.emitToUser(caregiver.userId, 'service-confirmed', { serviceId });
+        }
+
+        this.logger.log(`Family selected caregiver ${caregiverId} for service ${serviceId}`);
+        return { status: 'accepted' };
     }
 
     private getServiceTypeName(type: string): string {

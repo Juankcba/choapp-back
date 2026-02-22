@@ -45,6 +45,12 @@ export class ServicesController {
         return this.servicesService.findById(id);
     }
 
+    @Get(':id/candidates')
+    @Roles('family')
+    async getCandidates(@Param('id') id: string) {
+        return this.servicesService.getInterestedCaregivers(id);
+    }
+
     @Patch(':id')
     @Roles('family')
     async update(@Req() req: any, @Param('id') id: string, @Body() body: any) {
@@ -67,9 +73,13 @@ export class ServicesController {
         return this.servicesService.respondToService(req.user.userId, id, body.accepted);
     }
 
-    @Post(':id/accept')
+    @Post(':id/select')
     @Roles('family')
-    async acceptCaregiver(@Req() req: any, @Param('id') id: string) {
-        return this.servicesService.acceptService(id, req.user.userId);
+    async selectCaregiver(
+        @Req() req: any,
+        @Param('id') id: string,
+        @Body() body: { caregiverId: string },
+    ) {
+        return this.servicesService.selectCaregiver(req.user.userId, id, body.caregiverId);
     }
 }
