@@ -2,6 +2,8 @@ import {
     Controller,
     Get,
     Post,
+    Patch,
+    Delete,
     Body,
     Param,
     Req,
@@ -35,13 +37,24 @@ export class ServicesController {
     @Get('nearby')
     @Roles('caregiver')
     async getNearbyServices(@Req() req: any) {
-        // Get notifications for this caregiver
         return this.servicesService.getNotificationsForCaregiver(req.user.userId);
     }
 
     @Get(':id')
     async findById(@Param('id') id: string) {
         return this.servicesService.findById(id);
+    }
+
+    @Patch(':id')
+    @Roles('family')
+    async update(@Req() req: any, @Param('id') id: string, @Body() body: any) {
+        return this.servicesService.update(req.user.userId, id, body);
+    }
+
+    @Delete(':id')
+    @Roles('family')
+    async remove(@Req() req: any, @Param('id') id: string) {
+        return this.servicesService.remove(req.user.userId, id);
     }
 
     @Post(':id/respond')

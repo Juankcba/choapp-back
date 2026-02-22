@@ -76,6 +76,44 @@ export class ServicesService {
         return service;
     }
 
+    async update(userId: string, serviceId: string, data: any) {
+        const family = await this.prisma.family.findUnique({ where: { userId } });
+        if (!family) throw new NotFoundException('Family profile not found');
+
+        const service = await this.prisma.service.findUnique({ where: { id: serviceId } });
+        if (!service) throw new NotFoundException('Service not found');
+        if (service.familyId !== family.id) throw new NotFoundException('Service not found');
+        if (service.status !== 'pending') throw new Error('Only pending services can be edited');
+
+        return this.prisma.service.update({
+            where: { id: serviceId },
+            data: {
+                ...(data.serviceType && { serviceType: data.serviceType }),
+                ...(data.patientName && { patientName: data.patientName }),
+                ...(data.patientAge != null && { patientAge: data.patientAge }),
+                ...(data.patientCondition && { patientCondition: data.patientCondition }),
+                ...(data.specialNeeds && { specialNeeds: data.specialNeeds }),
+                ...(data.scheduledDate && { scheduledDate: new Date(data.scheduledDate) }),
+                ...(data.duration != null && { duration: data.duration }),
+                ...(data.notes !== undefined && { notes: data.notes }),
+            },
+        });
+    }
+
+    async remove(userId: string, serviceId: string) {
+        const family = await this.prisma.family.findUnique({ where: { userId } });
+        if (!family) throw new NotFoundException('Family profile not found');
+
+        const service = await this.prisma.service.findUnique({ where: { id: serviceId } });
+        if (!service) throw new NotFoundException('Service not found');
+        if (service.familyId !== family.id) throw new NotFoundException('Service not found');
+
+        // Delete related notifications first
+        await this.prisma.serviceNotification.deleteMany({ where: { serviceId } });
+
+        return this.prisma.service.delete({ where: { id: serviceId } });
+    }
+
     async acceptService(serviceId: string, userId: string) {
         const caregiver = await this.prisma.caregiver.findUnique({ where: { userId } });
         if (!caregiver) throw new NotFoundException('Caregiver not found');
@@ -120,3 +158,4 @@ export class ServicesService {
         return this.matchingService.respondToService(caregiver.id, serviceId, accepted);
     }
 }
+
