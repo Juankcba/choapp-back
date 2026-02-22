@@ -3,10 +3,15 @@ import {
     ConflictException,
     UnauthorizedException,
     InternalServerErrorException,
+    BadRequestException,
+    NotFoundException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
+import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { MailService } from '../mail/mail.service';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
 
 @Injectable()
@@ -14,6 +19,8 @@ export class AuthService {
     constructor(
         private prisma: PrismaService,
         private jwtService: JwtService,
+        private configService: ConfigService,
+        private mailService: MailService,
     ) { }
 
     async register(dto: RegisterDto) {
@@ -44,6 +51,9 @@ export class AuthService {
             } else if (dto.role === 'family') {
                 await this.prisma.family.create({ data: { userId: user.id } });
             }
+
+            // Send welcome email (non-blocking)
+            this.mailService.sendWelcomeEmail(user.email, user.name || user.firstName || 'Usuario');
 
             const payload = { email: user.email, sub: user.id, role: user.role };
             return {
@@ -100,6 +110,9 @@ export class AuthService {
                 },
                 include: { family: true, caregiver: true },
             });
+
+            // Send welcome email for new social login users
+            this.mailService.sendWelcomeEmail(data.email, data.name || 'Usuario');
         } else {
             await this.prisma.user.update({
                 where: { id: user.id },
@@ -156,5 +169,94 @@ export class AuthService {
             firstName: user.firstName,
             lastName: user.lastName,
         };
+    }
+
+    // ─── Forgot / Reset Password ─────────────────────────
+
+    async forgotPassword(email: string) {
+        const user = await this.prisma.user.findUnique({ where: { email } });
+
+        // Always return success to prevent email enumeration
+        if (!user) {
+            return { message: 'Si el email existe, recibirás un enlace para restablecer tu contraseña.' };
+        }
+
+        // Invalidate any existing tokens for this user
+        await this.prisma.passwordReset.updateMany({
+            where: { userId: user.id, used: false },
+            data: { used: true },
+        });
+
+        // Generate secure token
+        const token = crypto.randomBytes(32).toString('hex');
+        const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+        await this.prisma.passwordReset.create({
+            data: {
+                userId: user.id,
+                token,
+                expires,
+            },
+        });
+
+        const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'https://cho.bladelink.company';
+        const resetUrl = `${frontendUrl}/reset-password?token=${token}`;
+
+        await this.mailService.sendPasswordResetEmail(
+            user.email,
+            user.name || user.firstName || 'Usuario',
+            resetUrl,
+        );
+
+        return { message: 'Si el email existe, recibirás un enlace para restablecer tu contraseña.' };
+    }
+
+    async resetPassword(token: string, newPassword: string) {
+        if (!token || !newPassword) {
+            throw new BadRequestException('Token y nueva contraseña son requeridos');
+        }
+
+        if (newPassword.length < 6) {
+            throw new BadRequestException('La contraseña debe tener al menos 6 caracteres');
+        }
+
+        const passwordReset = await this.prisma.passwordReset.findUnique({
+            where: { token },
+            include: { user: true },
+        });
+
+        if (!passwordReset) {
+            throw new NotFoundException('Token inválido o expirado');
+        }
+
+        if (passwordReset.used) {
+            throw new BadRequestException('Este enlace ya fue utilizado');
+        }
+
+        if (passwordReset.expires < new Date()) {
+            throw new BadRequestException('Este enlace ha expirado. Solicita uno nuevo.');
+        }
+
+        // Hash and update password
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+        await this.prisma.user.update({
+            where: { id: passwordReset.userId },
+            data: { password: hashedPassword },
+        });
+
+        // Mark token as used
+        await this.prisma.passwordReset.update({
+            where: { id: passwordReset.id },
+            data: { used: true },
+        });
+
+        // Send confirmation email
+        await this.mailService.sendPasswordChangedEmail(
+            passwordReset.user.email,
+            passwordReset.user.name || passwordReset.user.firstName || 'Usuario',
+        );
+
+        return { message: 'Tu contraseña ha sido actualizada exitosamente.' };
     }
 }

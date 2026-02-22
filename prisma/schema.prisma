@@ -46,6 +46,17 @@ model VerificationToken {
   @@unique([identifier, token])
 }
 
+model PasswordReset {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId
+  token     String   @unique
+  expires   DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
 // ─── App Models ─────────────────────────────────────────
 
 model User {
@@ -64,11 +75,12 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  accounts  Account[]
-  sessions  Session[]
-  caregiver Caregiver?
-  family    Family?
-  reviews   Review[]
+  accounts       Account[]
+  sessions       Session[]
+  passwordResets PasswordReset[]
+  caregiver      Caregiver?
+  family         Family?
+  reviews        Review[]
 }
 
 model Caregiver {
