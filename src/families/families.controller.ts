@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Body, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Req, UseGuards } from '@nestjs/common';
 import { FamiliesService } from './families.service';
 import { Roles } from '../auth/decorators';
 import { RolesGuard } from '../auth/roles.guard';
@@ -12,6 +12,12 @@ export class FamiliesController {
     @Roles('family')
     async getProfile(@Req() req: any) {
         return this.familiesService.getProfile(req.user.userId);
+    }
+
+    @Post('profile')
+    @Roles('family')
+    async createProfile(@Req() req: any, @Body() body: any) {
+        return this.familiesService.updateProfile(req.user.userId, body);
     }
 
     @Patch('profile')

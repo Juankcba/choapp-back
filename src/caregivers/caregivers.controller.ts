@@ -23,6 +23,12 @@ export class CaregiversController {
         return this.caregiversService.getProfile(req.user.userId);
     }
 
+    @Post('profile')
+    @Roles('caregiver')
+    async createProfile(@Req() req: any, @Body() body: any) {
+        return this.caregiversService.updateProfile(req.user.userId, body);
+    }
+
     @Patch('profile')
     @Roles('caregiver')
     async updateProfile(@Req() req: any, @Body() body: any) {
