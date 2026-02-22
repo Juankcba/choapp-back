@@ -121,7 +121,7 @@ export class AuthService {
         }
 
         const hasProfile = user.family || user.caregiver;
-        const role = hasProfile ? user.role : 'pending';
+        const role = user.role === 'admin' ? 'admin' : (hasProfile ? user.role : 'pending');
 
         const payload = { email: user.email, sub: user.id, role };
         return {
