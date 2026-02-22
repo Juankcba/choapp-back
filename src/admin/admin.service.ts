@@ -1,96 +1,46 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { User, UserDocument } from '../schemas/user.schema';
-import { Caregiver, CaregiverDocument } from '../schemas/caregiver.schema';
-import { Family, FamilyDocument } from '../schemas/family.schema';
-import { Service, ServiceDocument } from '../schemas/service.schema';
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class AdminService {
-    constructor(
-        @InjectModel(User.name) private userModel: Model<UserDocument>,
-        @InjectModel(Caregiver.name)
-        private caregiverModel: Model<CaregiverDocument>,
-        @InjectModel(Family.name) private familyModel: Model<FamilyDocument>,
-        @InjectModel(Service.name) private serviceModel: Model<ServiceDocument>,
-    ) { }
+    constructor(private prisma: PrismaService) { }
 
     async getStats() {
-        const [
-            totalUsers,
-            totalCaregivers,
-            totalFamilies,
-            pendingVerifications,
-            activeServices,
-            completedServices,
-        ] = await Promise.all([
-            this.userModel.countDocuments(),
-            this.caregiverModel.countDocuments(),
-            this.familyModel.countDocuments(),
-            this.caregiverModel.countDocuments({ verificationStatus: 'pending' }),
-            this.serviceModel.countDocuments({
-                status: { $in: ['pending', 'matched', 'accepted', 'in_progress'] },
-            }),
-            this.serviceModel.countDocuments({ status: 'completed' }),
-        ]);
+        const [totalUsers, totalCaregivers, totalFamilies, totalServices, activeServices] =
+            await Promise.all([
+                this.prisma.user.count(),
+                this.prisma.caregiver.count(),
+                this.prisma.family.count(),
+                this.prisma.service.count(),
+                this.prisma.service.count({ where: { status: { in: ['pending', 'accepted', 'inProgress'] } } }),
+            ]);
 
-        const revenueResult = await this.serviceModel.aggregate([
-            { $match: { status: 'completed' } },
-            { $group: { _id: null, total: { $sum: '$totalAmount' } } },
-        ]);
-        const totalRevenue = revenueResult[0]?.total || 0;
-
-        return {
-            totalUsers,
-            totalCaregivers,
-            totalFamilies,
-            pendingVerifications,
-            activeServices,
-            completedServices,
-            totalRevenue,
-        };
+        return { totalUsers, totalCaregivers, totalFamilies, totalServices, activeServices };
     }
 
     async getPendingCaregivers() {
-        return this.caregiverModel
-            .find({ verificationStatus: 'pending' })
-            .populate('userId', '-password')
-            .sort({ createdAt: -1 })
-            .lean();
+        return this.prisma.caregiver.findMany({
+            where: { verificationStatus: 'pending' },
+            include: { user: { select: { email: true, firstName: true, lastName: true, phone: true, createdAt: true } } },
+            orderBy: { createdAt: 'desc' },
+        });
     }
 
     async verifyCaregiver(caregiverId: string, approved: boolean) {
-        const caregiver = await this.caregiverModel.findByIdAndUpdate(
-            caregiverId,
-            {
-                verificationStatus: approved ? 'verified' : 'rejected',
-            },
-            { new: true },
-        );
-        if (!caregiver)
-            throw new NotFoundException('Cuidador no encontrado');
-
-        return {
-            message: approved ? 'Cuidador verificado' : 'Cuidador rechazado',
-            caregiver,
-        };
+        return this.prisma.caregiver.update({
+            where: { id: caregiverId },
+            data: { verificationStatus: approved ? 'verified' : 'rejected' },
+        });
     }
 
     async getActiveServices() {
-        return this.serviceModel
-            .find({
-                status: { $in: ['pending', 'matched', 'accepted', 'in_progress'] },
-            })
-            .populate({
-                path: 'familyId',
-                populate: { path: 'userId', select: 'firstName lastName' },
-            })
-            .populate({
-                path: 'caregiverId',
-                populate: { path: 'userId', select: 'firstName lastName' },
-            })
-            .sort({ createdAt: -1 })
-            .lean();
+        return this.prisma.service.findMany({
+            where: { status: { in: ['pending', 'accepted', 'inProgress'] } },
+            include: {
+                family: { include: { user: { select: { firstName: true, lastName: true } } } },
+                caregiver: { include: { user: { select: { firstName: true, lastName: true } } } },
+            },
+            orderBy: { createdAt: 'desc' },
+        });
     }
 }

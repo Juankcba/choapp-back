@@ -1,158 +1,76 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { Service, ServiceDocument } from '../schemas/service.schema';
-import { Family, FamilyDocument } from '../schemas/family.schema';
-import { Caregiver, CaregiverDocument } from '../schemas/caregiver.schema';
-import { User, UserDocument } from '../schemas/user.schema';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class ServicesService {
-    constructor(
-        @InjectModel(Service.name) private serviceModel: Model<ServiceDocument>,
-        @InjectModel(Family.name) private familyModel: Model<FamilyDocument>,
-        @InjectModel(Caregiver.name) private caregiverModel: Model<CaregiverDocument>,
-        @InjectModel(User.name) private userModel: Model<UserDocument>,
-    ) { }
+    constructor(private prisma: PrismaService) { }
 
-    async create(userId: string, createServiceDto: any) {
-        const family = await this.familyModel.findOne({ userId });
-        if (!family) throw new NotFoundException('Perfil familiar no encontrado');
+    async create(userId: string, data: any) {
+        const family = await this.prisma.family.findUnique({ where: { userId } });
+        if (!family) throw new NotFoundException('Family profile not found');
 
-        const {
-            serviceType,
-            patientInfo,
-            scheduledDate,
-            duration,
-            paymentMethod,
-            notes,
-        } = createServiceDto;
-
-        // Find available caregivers within 30km radius
-        let caregivers: CaregiverDocument[] = [];
-        try {
-            caregivers = await this.caregiverModel
-                .find({
-                    verificationStatus: 'verified',
-                    'availability.isAvailable': true,
-                    specialties: serviceType,
-                    currentLocation: {
-                        $near: {
-                            $geometry: family.location,
-                            $maxDistance: 30000,
-                        },
-                    },
-                })
-                .limit(10);
-        } catch {
-            // If geospatial query fails (no 2dsphere index or no location data), get all available
-            caregivers = await this.caregiverModel
-                .find({
-                    verificationStatus: 'verified',
-                    'availability.isAvailable': true,
-                    specialties: serviceType,
-                })
-                .limit(10);
-        }
-
-        const averageRate =
-            caregivers.length > 0
-                ? caregivers.reduce((sum, c) => sum + c.hourlyRate, 0) /
-                caregivers.length
-                : 25000;
-
-        const totalAmount = averageRate * duration;
-        const cashCode =
-            paymentMethod === 'cash'
-                ? Math.floor(100000 + Math.random() * 900000).toString()
-                : undefined;
-
-        const service = await this.serviceModel.create({
-            familyId: family._id,
-            serviceType,
-            patientInfo,
-            location: family.location,
-            address: family.address,
-            scheduledDate,
-            duration,
-            status: caregivers.length > 0 ? 'matched' : 'pending',
-            hourlyRate: averageRate,
-            totalAmount,
-            paymentMethod,
-            paymentStatus: 'pending',
-            cashCode,
-            matchedCaregiversIds: caregivers.map((c) => c._id),
-            rejectedByCaregiversIds: [],
-            notes,
+        const service = await this.prisma.service.create({
+            data: {
+                familyId: family.id,
+                serviceType: data.serviceType,
+                patientName: data.patientName,
+                patientAge: data.patientAge,
+                patientCondition: data.patientCondition,
+                specialNeeds: data.specialNeeds,
+                scheduledDate: data.scheduledDate ? new Date(data.scheduledDate) : null,
+                duration: data.duration,
+                paymentMethod: data.paymentMethod,
+                amount: data.amount,
+                notes: data.notes,
+                locationLat: data.locationLat || family.locationLat,
+                locationLng: data.locationLng || family.locationLng,
+            },
         });
 
-        return {
-            message: 'Solicitud creada exitosamente',
-            serviceId: service._id,
-            matchedCaregiversCount: caregivers.length,
-        };
+        return service;
     }
 
     async findByFamily(userId: string) {
-        const family = await this.familyModel.findOne({ userId });
-        if (!family) throw new NotFoundException('Perfil familiar no encontrado');
+        const family = await this.prisma.family.findUnique({ where: { userId } });
+        if (!family) throw new NotFoundException('Family profile not found');
 
-        const services = await this.serviceModel
-            .find({ familyId: family._id })
-            .populate({
-                path: 'caregiverId',
-                populate: { path: 'userId', select: 'firstName lastName' },
-            })
-            .sort({ createdAt: -1 })
-            .lean();
-
-        // Transform to add caregiver name info to each service
-        return services.map((s: any) => {
-            const caregiver = s.caregiverId;
-            return {
-                ...s,
-                caregiver: caregiver
-                    ? {
-                        firstName: caregiver.userId?.firstName || '',
-                        lastName: caregiver.userId?.lastName || '',
-                        rating: caregiver.rating,
-                    }
-                    : undefined,
-                caregiverId: caregiver?._id,
-            };
+        return this.prisma.service.findMany({
+            where: { familyId: family.id },
+            include: {
+                caregiver: {
+                    include: { user: { select: { firstName: true, lastName: true, image: true } } },
+                },
+            },
+            orderBy: { createdAt: 'desc' },
         });
     }
 
     async findById(id: string) {
-        const service = await this.serviceModel
-            .findById(id)
-            .populate({
-                path: 'caregiverId',
-                populate: { path: 'userId', select: 'firstName lastName profileImage' },
-            })
-            .populate({
-                path: 'familyId',
-                populate: { path: 'userId', select: 'firstName lastName' },
-            })
-            .lean();
-        if (!service) throw new NotFoundException('Servicio no encontrado');
+        const service = await this.prisma.service.findUnique({
+            where: { id },
+            include: {
+                family: {
+                    include: { user: { select: { firstName: true, lastName: true, phone: true } } },
+                },
+                caregiver: {
+                    include: { user: { select: { firstName: true, lastName: true, phone: true, image: true } } },
+                },
+            },
+        });
+        if (!service) throw new NotFoundException('Service not found');
         return service;
     }
 
-    async acceptCaregiver(serviceId: string, userId: string) {
-        const family = await this.familyModel.findOne({ userId });
-        if (!family) throw new NotFoundException('Perfil familiar no encontrado');
+    async acceptService(serviceId: string, userId: string) {
+        const caregiver = await this.prisma.caregiver.findUnique({ where: { userId } });
+        if (!caregiver) throw new NotFoundException('Caregiver not found');
 
-        const service = await this.serviceModel.findOne({
-            _id: serviceId,
-            familyId: family._id,
+        return this.prisma.service.update({
+            where: { id: serviceId },
+            data: {
+                caregiverId: caregiver.id,
+                status: 'accepted',
+            },
         });
-        if (!service) throw new NotFoundException('Servicio no encontrado');
-
-        service.status = 'in_progress';
-        service.startTime = new Date();
-        await service.save();
-
-        return { message: 'Cuidador aceptado', service };
     }
 }

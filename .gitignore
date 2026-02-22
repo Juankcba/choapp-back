@@ -50,3 +50,5 @@ certs/*.key
 certs/*.csr
 certs/*.crt
 certs/production/
+
+/generated/prisma

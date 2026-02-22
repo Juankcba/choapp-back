@@ -1,28 +1,23 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { Family, FamilyDocument } from '../schemas/family.schema';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class FamiliesService {
-    constructor(
-        @InjectModel(Family.name) private familyModel: Model<FamilyDocument>,
-    ) { }
+    constructor(private prisma: PrismaService) { }
 
     async getProfile(userId: string) {
-        const family = await this.familyModel
-            .findOne({ userId })
-            .populate('userId', '-password')
-            .lean();
-        if (!family) throw new NotFoundException('Perfil familiar no encontrado');
+        const family = await this.prisma.family.findUnique({
+            where: { userId },
+            include: { user: { select: { email: true, firstName: true, lastName: true, phone: true, image: true } } },
+        });
+        if (!family) throw new NotFoundException('Family profile not found');
         return family;
     }
 
-    async updateProfile(userId: string, updateData: any) {
-        const family = await this.familyModel
-            .findOneAndUpdate({ userId }, updateData, { new: true })
-            .lean();
-        if (!family) throw new NotFoundException('Perfil familiar no encontrado');
-        return family;
+    async updateProfile(userId: string, data: any) {
+        return this.prisma.family.update({
+            where: { userId },
+            data,
+        });
     }
 }

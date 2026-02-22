@@ -1,0 +1,179 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("MONGODB_URI")
+}
+
+// ─── NextAuth Models ────────────────────────────────────
+
+model Account {
+  id                String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String  @db.ObjectId
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  sessionToken String   @unique
+  userId       String   @db.ObjectId
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── App Models ─────────────────────────────────────────
+
+model User {
+  id            String    @id @default(auto()) @map("_id") @db.ObjectId
+  email         String    @unique
+  emailVerified DateTime?
+  password      String?
+  phone         String?
+  role          String    @default("family") // family | caregiver | admin
+  firstName     String?
+  lastName      String?
+  name          String?
+  image         String?
+  isActive      Boolean   @default(true)
+  lastLogin     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts  Account[]
+  sessions  Session[]
+  caregiver Caregiver?
+  family    Family?
+  reviews   Review[]
+}
+
+model Caregiver {
+  id                 String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId             String   @unique @db.ObjectId
+  bio                String   @default("")
+  specialties        String[]
+  experience         Int      @default(0)
+  hourlyRate         Float    @default(0)
+  certifications     Json[]
+  documents          Json[]
+  rating             Float    @default(0)
+  totalReviews       Int      @default(0)
+  totalServices      Int      @default(0)
+  isAvailable        Boolean  @default(true)
+  schedule           Json[]
+  serviceRadius      Int      @default(30000)
+  locationLat        Float?
+  locationLng        Float?
+  verificationStatus String   @default("pending") // pending | verified | rejected
+  earningsTotal      Float    @default(0)
+  earningsPending    Float    @default(0)
+  earningsAvailable  Float    @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  services Service[] @relation("CaregiverServices")
+  reviews  Review[]
+}
+
+model Family {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId                String   @unique @db.ObjectId
+  address               String?
+  locationLat           Float?
+  locationLng           Float?
+  emergencyContactName  String?
+  emergencyContactPhone String?
+  emergencyContactRel   String?
+  paymentMethods        Json[]
+  favoriteCaregiverIds  String[] @db.ObjectId
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  services Service[]
+}
+
+model Service {
+  id             String    @id @default(auto()) @map("_id") @db.ObjectId
+  familyId       String    @db.ObjectId
+  caregiverId    String?   @db.ObjectId
+  serviceType    String // companionship | medication | rehabilitation | postSurgery | specialCare
+  status         String    @default("pending") // pending | accepted | inProgress | completed | cancelled
+  patientName    String?
+  patientAge     Int?
+  patientCondition String?
+  specialNeeds   String?
+  scheduledDate  DateTime?
+  duration       Int? // in hours
+  actualStart    DateTime?
+  actualEnd      DateTime?
+  paymentMethod  String?
+  paymentStatus  String    @default("pending") // pending | paid | refunded
+  amount         Float?
+  notes          String?
+  locationLat    Float?
+  locationLng    Float?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  family    Family     @relation(fields: [familyId], references: [id])
+  caregiver Caregiver? @relation("CaregiverServices", fields: [caregiverId], references: [id])
+  chats     Chat[]
+  reviews   Review[]
+}
+
+model Chat {
+  id        String    @id @default(auto()) @map("_id") @db.ObjectId
+  serviceId String    @db.ObjectId
+  messages  Message[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  service Service @relation(fields: [serviceId], references: [id])
+}
+
+type Message {
+  senderId  String   @db.ObjectId
+  content   String
+  timestamp DateTime @default(now())
+  read      Boolean  @default(false)
+}
+
+model Review {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  serviceId   String   @db.ObjectId
+  caregiverId String   @db.ObjectId
+  reviewerId  String   @db.ObjectId
+  rating      Int
+  comment     String?
+  createdAt   DateTime @default(now())
+
+  service   Service   @relation(fields: [serviceId], references: [id])
+  caregiver Caregiver @relation(fields: [caregiverId], references: [id])
+  reviewer  User      @relation(fields: [reviewerId], references: [id])
+}

@@ -1,90 +1,71 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
-import { Chat, ChatDocument } from '../schemas/chat.schema';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class ChatService {
-    constructor(
-        @InjectModel(Chat.name) private chatModel: Model<ChatDocument>,
-    ) { }
+    constructor(private prisma: PrismaService) { }
 
-    async findOrCreateByService(
-        serviceId: string,
-        familyId: string,
-        caregiverId: string,
-    ) {
-        let chat = await this.chatModel.findOne({ serviceId }).lean();
+    async findOrCreateChat(serviceId: string) {
+        let chat = await this.prisma.chat.findFirst({
+            where: { serviceId },
+        });
 
         if (!chat) {
-            chat = (
-                await this.chatModel.create({
-                    serviceId: new Types.ObjectId(serviceId),
-                    familyId: new Types.ObjectId(familyId),
-                    caregiverId: new Types.ObjectId(caregiverId),
+            chat = await this.prisma.chat.create({
+                data: {
+                    serviceId,
                     messages: [],
-                })
-            ).toObject();
+                },
+            });
         }
 
         return chat;
     }
 
     async getMessages(serviceId: string) {
-        const chat = await this.chatModel.findOne({ serviceId }).lean();
-        if (!chat) return { messages: [] };
-        return chat;
+        const chat = await this.prisma.chat.findFirst({
+            where: { serviceId },
+        });
+        if (!chat) return [];
+        return chat.messages;
     }
 
-    async addMessage(
-        serviceId: string,
-        senderId: string,
-        content: string,
-    ) {
-        const message = {
-            senderId: new Types.ObjectId(senderId),
+    async addMessage(serviceId: string, senderId: string, content: string) {
+        let chat = await this.findOrCreateChat(serviceId);
+
+        const newMessage = {
+            senderId,
             content,
             timestamp: new Date(),
-            isRead: false,
+            read: false,
         };
 
-        const chat = await this.chatModel.findOneAndUpdate(
-            { serviceId },
-            {
-                $push: { messages: message },
-                $set: {
-                    lastMessage: {
-                        content,
-                        timestamp: new Date(),
-                        senderId: new Types.ObjectId(senderId),
-                    },
+        chat = await this.prisma.chat.update({
+            where: { id: chat.id },
+            data: {
+                messages: {
+                    push: newMessage,
                 },
             },
-            { new: true },
-        );
+        });
 
-        if (!chat) throw new NotFoundException('Chat no encontrado');
-
-        return message;
+        return newMessage;
     }
 
     async markAsRead(serviceId: string, userId: string) {
-        await this.chatModel.updateOne(
-            { serviceId },
-            {
-                $set: {
-                    'messages.$[elem].isRead': true,
-                },
-            },
-            {
-                arrayFilters: [
-                    {
-                        'elem.senderId': { $ne: new Types.ObjectId(userId) },
-                        'elem.isRead': false,
-                    },
-                ],
-            },
-        );
-        return { success: true };
+        const chat = await this.prisma.chat.findFirst({ where: { serviceId } });
+        if (!chat) throw new NotFoundException('Chat not found');
+
+        const updatedMessages = chat.messages.map((msg) => {
+            if (msg.senderId !== userId && !msg.read) {
+                return { ...msg, read: true };
+            }
+            return msg;
+        });
+
+        return this.prisma.chat.update({
+            where: { id: chat.id },
+            data: { messages: updatedMessages },
+        });
     }
 }

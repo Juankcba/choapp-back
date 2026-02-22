@@ -1,115 +1,74 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { Caregiver, CaregiverDocument } from '../schemas/caregiver.schema';
-import { User, UserDocument } from '../schemas/user.schema';
-import { Service, ServiceDocument } from '../schemas/service.schema';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class CaregiversService {
-    constructor(
-        @InjectModel(Caregiver.name)
-        private caregiverModel: Model<CaregiverDocument>,
-        @InjectModel(User.name) private userModel: Model<UserDocument>,
-        @InjectModel(Service.name) private serviceModel: Model<ServiceDocument>,
-    ) { }
+    constructor(private prisma: PrismaService) { }
 
     async getProfile(userId: string) {
-        const caregiver = await this.caregiverModel
-            .findOne({ userId })
-            .populate('userId', '-password')
-            .lean();
-        if (!caregiver)
-            throw new NotFoundException('Perfil de cuidador no encontrado');
+        const caregiver = await this.prisma.caregiver.findUnique({
+            where: { userId },
+            include: { user: { select: { email: true, firstName: true, lastName: true, phone: true, image: true } } },
+        });
+        if (!caregiver) throw new NotFoundException('Caregiver profile not found');
         return caregiver;
     }
 
-    async updateProfile(userId: string, updateData: any) {
-        const caregiver = await this.caregiverModel
-            .findOneAndUpdate({ userId }, updateData, { new: true })
-            .lean();
-        if (!caregiver)
-            throw new NotFoundException('Perfil de cuidador no encontrado');
-        return caregiver;
+    async updateProfile(userId: string, data: any) {
+        return this.prisma.caregiver.update({ where: { userId }, data });
     }
 
     async updateAvailability(userId: string, isAvailable: boolean) {
-        const caregiver = await this.caregiverModel.findOneAndUpdate(
-            { userId },
-            { 'availability.isAvailable': isAvailable },
-            { new: true },
-        );
-        if (!caregiver)
-            throw new NotFoundException('Perfil de cuidador no encontrado');
-        return { isAvailable: caregiver.availability.isAvailable };
+        return this.prisma.caregiver.update({
+            where: { userId },
+            data: { isAvailable },
+        });
     }
 
     async getJobs(userId: string) {
-        const caregiver = await this.caregiverModel.findOne({ userId });
-        if (!caregiver)
-            throw new NotFoundException('Perfil de cuidador no encontrado');
+        const caregiver = await this.prisma.caregiver.findUnique({ where: { userId } });
+        if (!caregiver) throw new NotFoundException('Caregiver not found');
 
-        const availableJobs = await this.serviceModel
-            .find({
-                matchedCaregiversIds: caregiver._id,
-                caregiverId: { $exists: false },
-                status: { $in: ['pending', 'matched'] },
-                rejectedByCaregiversIds: { $ne: caregiver._id },
-                scheduledDate: { $gte: new Date() },
-            })
-            .sort({ createdAt: -1 })
-            .lean();
-
-        const myJobs = await this.serviceModel
-            .find({
-                caregiverId: caregiver._id,
-                status: { $in: ['accepted', 'in_progress', 'completed'] },
-            })
-            .sort({ scheduledDate: -1 })
-            .lean();
-
-        return { availableJobs, myJobs };
+        return this.prisma.service.findMany({
+            where: {
+                OR: [
+                    { caregiverId: caregiver.id },
+                    { status: 'pending', caregiverId: null },
+                ],
+            },
+            include: {
+                family: {
+                    include: { user: { select: { firstName: true, lastName: true, phone: true } } },
+                },
+            },
+            orderBy: { createdAt: 'desc' },
+        });
     }
 
     async acceptJob(userId: string, serviceId: string) {
-        const caregiver = await this.caregiverModel.findOne({ userId });
-        if (!caregiver)
-            throw new NotFoundException('Perfil de cuidador no encontrado');
+        const caregiver = await this.prisma.caregiver.findUnique({ where: { userId } });
+        if (!caregiver) throw new NotFoundException('Caregiver not found');
 
-        const service = await this.serviceModel.findById(serviceId);
-        if (!service)
-            throw new NotFoundException('Servicio no encontrado');
-
-        service.caregiverId = caregiver._id;
-        service.status = 'accepted';
-        await service.save();
-
-        return { message: 'Trabajo aceptado exitosamente', service };
+        return this.prisma.service.update({
+            where: { id: serviceId },
+            data: { caregiverId: caregiver.id, status: 'accepted' },
+        });
     }
 
     async completeJob(userId: string, serviceId: string) {
-        const caregiver = await this.caregiverModel.findOne({ userId });
-        if (!caregiver)
-            throw new NotFoundException('Perfil de cuidador no encontrado');
+        const caregiver = await this.prisma.caregiver.findUnique({ where: { userId } });
+        if (!caregiver) throw new NotFoundException('Caregiver not found');
 
-        const service = await this.serviceModel.findOne({
-            _id: serviceId,
-            caregiverId: caregiver._id,
+        const service = await this.prisma.service.update({
+            where: { id: serviceId },
+            data: { status: 'completed', actualEnd: new Date() },
         });
-        if (!service)
-            throw new NotFoundException('Servicio no encontrado');
 
-        service.status = 'completed';
-        service.endTime = new Date();
-        service.paymentStatus = 'paid';
-        await service.save();
+        await this.prisma.caregiver.update({
+            where: { id: caregiver.id },
+            data: { totalServices: { increment: 1 } },
+        });
 
-        // Update caregiver stats
-        caregiver.totalServices += 1;
-        caregiver.earnings.total += service.totalAmount;
-        caregiver.earnings.available += service.totalAmount;
-        await caregiver.save();
-
-        return { message: 'Servicio completado', service };
+        return service;
     }
 }

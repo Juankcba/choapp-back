@@ -36,6 +36,6 @@ export class ServicesController {
     @Post(':id/accept')
     @Roles('family')
     async acceptCaregiver(@Req() req: any, @Param('id') id: string) {
-        return this.servicesService.acceptCaregiver(id, req.user.userId);
+        return this.servicesService.acceptService(id, req.user.userId);
     }
 }

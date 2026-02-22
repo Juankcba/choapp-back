@@ -1,20 +1,16 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
-import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
+import { APP_GUARD } from '@nestjs/core';
 import { JwtAuthGuard } from './jwt-auth.guard';
-import { User, UserSchema } from '../schemas/user.schema';
-import { Caregiver, CaregiverSchema } from '../schemas/caregiver.schema';
-import { Family, FamilySchema } from '../schemas/family.schema';
 
 @Module({
     imports: [
-        PassportModule.register({ defaultStrategy: 'jwt' }),
+        PassportModule,
         JwtModule.registerAsync({
             imports: [ConfigModule],
             useFactory: (configService: ConfigService) => ({
@@ -23,11 +19,6 @@ import { Family, FamilySchema } from '../schemas/family.schema';
             }),
             inject: [ConfigService],
         }),
-        MongooseModule.forFeature([
-            { name: User.name, schema: UserSchema },
-            { name: Caregiver.name, schema: CaregiverSchema },
-            { name: Family.name, schema: FamilySchema },
-        ]),
     ],
     controllers: [AuthController],
     providers: [
@@ -38,6 +29,6 @@ import { Family, FamilySchema } from '../schemas/family.schema';
             useClass: JwtAuthGuard,
         },
     ],
-    exports: [AuthService, JwtModule],
+    exports: [AuthService],
 })
 export class AuthModule { }
