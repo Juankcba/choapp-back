@@ -197,10 +197,11 @@ model Chat {
 }
 
 type Message {
-  senderId  String   @db.ObjectId
-  content   String
-  timestamp DateTime @default(now())
-  read      Boolean  @default(false)
+  senderId   String   @db.ObjectId
+  senderName String?
+  content    String
+  timestamp  DateTime @default(now())
+  read       Boolean  @default(false)
 }
 
 model Review {

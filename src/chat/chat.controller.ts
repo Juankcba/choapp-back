@@ -40,7 +40,14 @@ export class ChatController {
         @Req() req: any,
         @Body() body: { content: string },
     ) {
-        return this.chatService.addMessage(serviceId, caregiverId, req.user.userId, body.content);
+        console.log('📨 Chat sendMessage:', { serviceId, caregiverId, userId: req.user?.userId, content: body.content?.substring(0, 20) });
+        try {
+            const result = await this.chatService.addMessage(serviceId, caregiverId, req.user.userId, body.content);
+            return result;
+        } catch (error) {
+            console.error('❌ Chat sendMessage error:', error);
+            throw error;
+        }
     }
 
     /**
