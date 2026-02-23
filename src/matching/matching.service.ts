@@ -145,6 +145,26 @@ export class MatchingService {
         let notifiedCount = 0;
 
         for (const cg of nearbyCaregivers) {
+            // Skip if already notified (prevents duplicates from cron re-runs)
+            const existing = await this.prisma.serviceNotification.findFirst({
+                where: { serviceId: service.id, caregiverId: cg.id },
+            });
+            if (existing) {
+                // If caregiver is now online and notification is still pending, re-emit WebSocket
+                if (existing.status === 'pending' && this.matchingGateway.isOnline(cg.userId)) {
+                    this.matchingGateway.emitToCaregiver(cg.userId, 'new-service-nearby', {
+                        serviceId: service.id,
+                        serviceType: serviceTypeName,
+                        patientName: service.patientName || 'No especificado',
+                        familyName,
+                        distance: cg.distance,
+                        scheduledDate: service.scheduledDate,
+                        duration: service.duration,
+                    });
+                }
+                continue;
+            }
+
             const isOnline = this.matchingGateway.isOnline(cg.userId);
             let notifiedVia = 'email';
 
