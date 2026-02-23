@@ -1,53 +1,46 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as nodemailer from 'nodemailer';
-import * as dns from 'dns';
-
-// Force Node.js to resolve DNS to IPv4 first (Docker containers often lack IPv6)
-dns.setDefaultResultOrder('ipv4first');
 
 @Injectable()
 export class MailService {
-  private transporter: nodemailer.Transporter;
   private readonly logger = new Logger(MailService.name);
   private readonly fromEmail: string;
   private readonly fromName = 'CHO - Cuidadores';
+  private readonly emailApiUrl: string;
+  private readonly emailApiSecret: string;
 
   constructor(private configService: ConfigService) {
-    const user = this.configService.get<string>('MAIL_USER');
-    const pass = this.configService.get<string>('MAIL_APP_PASSWORD');
-    this.fromEmail = user || 'cho.live.app@gmail.com';
+    this.fromEmail = 'cho.live.app@gmail.com';
+    const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'https://cho.bladelink.company';
+    this.emailApiUrl = `${frontendUrl}/api/send-email`;
+    this.emailApiSecret = this.configService.get<string>('EMAIL_API_SECRET') || 'cho-email-secret-2026';
+    this.logger.log(`✅ Mail service configured (HTTP via ${this.emailApiUrl})`);
+  }
 
-    this.logger.log(`Configuring mail with user: ${user ? user : '(not set)'}`);
-
-    this.transporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 587,
-      secure: false,
-      auth: { user, pass },
-      family: 4, // Force IPv4 (Docker containers often lack IPv6)
-      connectionTimeout: 30000,
-      greetingTimeout: 30000,
-      socketTimeout: 30000,
-      tls: { rejectUnauthorized: false },
-    } as any);
-
-    // Verify connection on startup
-    this.transporter.verify().then(() => {
-      this.logger.log('✅ Mail transport ready');
-    }).catch((err) => {
-      this.logger.warn(`❌ Mail transport not ready: ${err.message}`);
+  /**
+   * Send email via frontend API route (HTTP)
+   */
+  private async sendEmail(to: string, subject: string, html: string): Promise<any> {
+    const res = await fetch(this.emailApiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.emailApiSecret}`,
+      },
+      body: JSON.stringify({ to, subject, html }),
     });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Email API error ${res.status}: ${err}`);
+    }
+
+    return res.json();
   }
 
   async sendWelcomeEmail(email: string, name: string): Promise<void> {
     try {
-      await this.transporter.sendMail({
-        from: `"${this.fromName}" <${this.fromEmail}>`,
-        to: email,
-        subject: '¡Bienvenido a CHO! 🎉',
-        html: this.welcomeTemplate(name),
-      });
+      await this.sendEmail(email, '¡Bienvenido a CHO! 🎉', this.welcomeTemplate(name));
       this.logger.log(`Welcome email sent to ${email}`);
     } catch (error) {
       this.logger.error(`Failed to send welcome email to ${email}`, error);
@@ -56,12 +49,7 @@ export class MailService {
 
   async sendPasswordResetEmail(email: string, name: string, resetUrl: string): Promise<void> {
     try {
-      await this.transporter.sendMail({
-        from: `"${this.fromName}" <${this.fromEmail}>`,
-        to: email,
-        subject: 'Restablecer tu contraseña - CHO',
-        html: this.passwordResetTemplate(name, resetUrl),
-      });
+      await this.sendEmail(email, 'Restablecer tu contraseña - CHO', this.passwordResetTemplate(name, resetUrl));
       this.logger.log(`Password reset email sent to ${email}`);
     } catch (error) {
       this.logger.error(`Failed to send password reset email to ${email}`, error);
@@ -70,12 +58,7 @@ export class MailService {
 
   async sendPasswordChangedEmail(email: string, name: string): Promise<void> {
     try {
-      await this.transporter.sendMail({
-        from: `"${this.fromName}" <${this.fromEmail}>`,
-        to: email,
-        subject: 'Tu contraseña ha sido cambiada - CHO',
-        html: this.passwordChangedTemplate(name),
-      });
+      await this.sendEmail(email, 'Tu contraseña ha sido cambiada - CHO', this.passwordChangedTemplate(name));
       this.logger.log(`Password changed email sent to ${email}`);
     } catch (error) {
       this.logger.error(`Failed to send password changed email to ${email}`, error);
@@ -84,20 +67,16 @@ export class MailService {
 
   async sendTestEmail(toEmail: string): Promise<{ success: boolean; message: string }> {
     try {
-      const info = await this.transporter.sendMail({
-        from: `"${this.fromName}" <${this.fromEmail}>`,
-        to: toEmail,
-        subject: '🧪 Test - CHO Mail Service',
-        html: this.baseLayout(`
+      const testHtml = this.baseLayout(`
           <h2 style="margin:0 0 16px;color:#111827;font-size:22px;">Test Email ✅</h2>
           <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
             Si estás leyendo esto, el servicio de email de <strong>CHO</strong> funciona correctamente.
           </p>
           <p style="margin:0;color:#9ca3af;font-size:13px;">
             Enviado: ${new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}
-          </p>`),
-      });
-      this.logger.log(`Test email sent to ${toEmail} - messageId: ${info.messageId}`);
+          </p>`);
+      await this.sendEmail(toEmail, '🧪 Test - CHO Mail Service', testHtml);
+      this.logger.log(`Test email sent to ${toEmail}`);
       return { success: true, message: `Email sent to ${toEmail}` };
     } catch (error) {
       this.logger.error(`Failed to send test email to ${toEmail}`, error);
@@ -114,11 +93,7 @@ export class MailService {
         ? new Date(details.scheduledDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })
         : 'A coordinar';
 
-      await this.transporter.sendMail({
-        from: `"${this.fromName}" <${this.fromEmail}>`,
-        to: email,
-        subject: `🔔 Nuevo servicio cerca tuyo - ${details.serviceType}`,
-        html: this.baseLayout(`
+      const nearbyHtml = this.baseLayout(`
           <h2 style="margin:0 0 16px;color:#111827;font-size:22px;">¡Hola ${name}!</h2>
           <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
             Hay un nuevo servicio de <strong>${details.serviceType}</strong> que necesita un cuidador cerca de tu ubicación.
@@ -136,8 +111,8 @@ export class MailService {
           </div>
           <p style="margin:0;color:#9ca3af;font-size:13px;text-align:center;">
             Si no te interesa, puedes ignorar este email.
-          </p>`),
-      });
+          </p>`);
+      await this.sendEmail(email, `🔔 Nuevo servicio cerca tuyo - ${details.serviceType}`, nearbyHtml);
       this.logger.log(`Service nearby email sent to ${email}`);
     } catch (error) {
       this.logger.error(`Failed to send service nearby email to ${email}`, error);
@@ -245,11 +220,7 @@ export class MailService {
     serviceId: string,
   ): Promise<void> {
     try {
-      await this.transporter.sendMail({
-        from: `"${this.fromName}" <${this.fromEmail}>`,
-        to: email,
-        subject: `💬 Nuevo mensaje de ${senderName} - CHO`,
-        html: this.baseLayout(`
+      const chatHtml = this.baseLayout(`
           <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
             Hola <strong>${recipientName}</strong>, tenés un nuevo mensaje de <strong>${senderName}</strong>:
           </p>
@@ -263,8 +234,8 @@ export class MailService {
                style="display:inline-block;background:#0070f3;color:white;text-decoration:none;padding:12px 32px;border-radius:8px;font-weight:600;font-size:15px;">
               Responder
             </a>
-          </div>`),
-      });
+          </div>`);
+      await this.sendEmail(email, `💬 Nuevo mensaje de ${senderName} - CHO`, chatHtml);
       this.logger.log(`Chat notification email sent to ${email}`);
     } catch (error) {
       this.logger.error(`Failed to send chat notification to ${email}`, error);
@@ -278,11 +249,7 @@ export class MailService {
     serviceId: string,
   ): Promise<void> {
     try {
-      await this.transporter.sendMail({
-        from: `"${this.fromName}" <${this.fromEmail}>`,
-        to: email,
-        subject: `💸 Pago liberado - $${amount.toLocaleString('es-AR')} - CHO`,
-        html: this.baseLayout(`
+      const payReleaseHtml = this.baseLayout(`
           <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
             Hola <strong>${name}</strong>, tu pago ha sido liberado:
           </p>
@@ -297,8 +264,8 @@ export class MailService {
                style="display:inline-block;background:#0070f3;color:white;text-decoration:none;padding:12px 32px;border-radius:8px;font-weight:600;font-size:15px;">
               Ver Mis Trabajos
             </a>
-          </div>`),
-      });
+          </div>`);
+      await this.sendEmail(email, `💸 Pago liberado - $${amount.toLocaleString('es-AR')} - CHO`, payReleaseHtml);
       this.logger.log(`Payment released email sent to ${email}`);
     } catch (error) {
       this.logger.error(`Failed to send payment released email to ${email}`, error);
@@ -314,11 +281,7 @@ export class MailService {
       const dateStr = details.scheduledDate
         ? new Date(details.scheduledDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })
         : 'A coordinar';
-      await this.transporter.sendMail({
-        from: `"${this.fromName}" <${this.fromEmail}>`,
-        to: email,
-        subject: `✅ Tu solicitud de servicio fue creada - CHO`,
-        html: this.baseLayout(`
+      const svcCreatedHtml = this.baseLayout(`
           <h2 style="margin:0 0 16px;color:#111827;font-size:22px;">¡Hola ${name}!</h2>
           <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
             Tu solicitud de <strong>${details.serviceType}</strong> para <strong>${details.patientName}</strong> fue creada correctamente.
@@ -329,8 +292,8 @@ export class MailService {
           </div>
           <p style="margin:0 0 16px;color:#4b5563;font-size:15px;">Te notificaremos cuando un cuidador muestre interés.</p>
           <a href="${this.getFrontendUrl()}/family/services/${details.serviceId}" style="display:inline-block;background:#6366f1;color:#fff;padding:12px 32px;border-radius:8px;text-decoration:none;font-weight:600;">Ver mi servicio</a>
-        `),
-      });
+        `);
+      await this.sendEmail(email, `✅ Tu solicitud de servicio fue creada - CHO`, svcCreatedHtml);
       this.logger.log(`Service created email sent to ${email}`);
     } catch (error) {
       this.logger.error(`Failed to send service created email to ${email}`, error);
@@ -343,19 +306,15 @@ export class MailService {
     details: { caregiverName: string; serviceType: string; serviceId: string },
   ): Promise<void> {
     try {
-      await this.transporter.sendMail({
-        from: `"${this.fromName}" <${this.fromEmail}>`,
-        to: email,
-        subject: `👋 ${details.caregiverName} quiere cuidar a tu familiar - CHO`,
-        html: this.baseLayout(`
+      const interestedHtml = this.baseLayout(`
           <h2 style="margin:0 0 16px;color:#111827;font-size:22px;">¡Hola ${familyName}!</h2>
           <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
             <strong>${details.caregiverName}</strong> ha mostrado interés en tu servicio de <strong>${details.serviceType}</strong>.
           </p>
           <p style="margin:0 0 16px;color:#4b5563;font-size:15px;">Podés chatear y ver su perfil para decidir si es la persona indicada.</p>
           <a href="${this.getFrontendUrl()}/family/services/${details.serviceId}" style="display:inline-block;background:#6366f1;color:#fff;padding:12px 32px;border-radius:8px;text-decoration:none;font-weight:600;">Ver candidatos</a>
-        `),
-      });
+        `);
+      await this.sendEmail(email, `👋 ${details.caregiverName} quiere cuidar a tu familiar - CHO`, interestedHtml);
       this.logger.log(`Caregiver interested email sent to ${email}`);
     } catch (error) {
       this.logger.error(`Failed to send caregiver interested email to ${email}`, error);
@@ -368,11 +327,7 @@ export class MailService {
     details: { familyName: string; serviceType: string; patientName: string; serviceId: string },
   ): Promise<void> {
     try {
-      await this.transporter.sendMail({
-        from: `"${this.fromName}" <${this.fromEmail}>`,
-        to: email,
-        subject: `🎉 ¡Te seleccionaron para un servicio! - CHO`,
-        html: this.baseLayout(`
+      const selectedHtml = this.baseLayout(`
           <h2 style="margin:0 0 16px;color:#111827;font-size:22px;">¡Felicidades ${caregiverName}!</h2>
           <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
             La familia <strong>${details.familyName}</strong> te ha seleccionado para cuidar a <strong>${details.patientName}</strong> (${details.serviceType}).
@@ -381,8 +336,8 @@ export class MailService {
             El pago se realizará antes del servicio a través de MercadoPago. Una vez confirmado, podrás prestar el servicio.
           </p>
           <a href="${this.getFrontendUrl()}/caregiver/dashboard" style="display:inline-block;background:#6366f1;color:#fff;padding:12px 32px;border-radius:8px;text-decoration:none;font-weight:600;">Ir a mi panel</a>
-        `),
-      });
+        `);
+      await this.sendEmail(email, `🎉 ¡Te seleccionaron para un servicio! - CHO`, selectedHtml);
       this.logger.log(`Caregiver selected email sent to ${email}`);
     } catch (error) {
       this.logger.error(`Failed to send caregiver selected email to ${email}`, error);
@@ -395,11 +350,7 @@ export class MailService {
     details: { familyName: string; serviceType: string; amount: number; serviceId: string },
   ): Promise<void> {
     try {
-      await this.transporter.sendMail({
-        from: `"${this.fromName}" <${this.fromEmail}>`,
-        to: email,
-        subject: `💰 Pago recibido - ¡Prestá el servicio! - CHO`,
-        html: this.baseLayout(`
+      const payRecvHtml = this.baseLayout(`
           <h2 style="margin:0 0 16px;color:#111827;font-size:22px;">¡Hola ${caregiverName}!</h2>
           <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
             La familia <strong>${details.familyName}</strong> ha realizado el pago de <strong>$${details.amount.toLocaleString('es-AR')}</strong> por el servicio de <strong>${details.serviceType}</strong>.
@@ -413,8 +364,8 @@ export class MailService {
             Una vez completado el servicio, el administrador liberará tu pago.
           </p>
           <a href="${this.getFrontendUrl()}/caregiver/dashboard" style="display:inline-block;background:#6366f1;color:#fff;padding:12px 32px;border-radius:8px;text-decoration:none;font-weight:600;">Ir a mi panel</a>
-        `),
-      });
+        `);
+      await this.sendEmail(email, `💰 Pago recibido - ¡Prestá el servicio! - CHO`, payRecvHtml);
       this.logger.log(`Payment received email sent to ${email}`);
     } catch (error) {
       this.logger.error(`Failed to send payment received email to ${email}`, error);
@@ -428,11 +379,7 @@ export class MailService {
     const adminEmail = this.fromEmail; // Send to the app's admin email
     try {
       const roleLabel = role === 'caregiver' ? 'Cuidador' : 'Familia';
-      await this.transporter.sendMail({
-        from: `"${this.fromName}" <${this.fromEmail}>`,
-        to: adminEmail,
-        subject: `🆕 Nuevo registro: ${userName} (${roleLabel})`,
-        html: this.baseLayout(`
+      const adminHtml = this.baseLayout(`
           <h2 style="color:#333;margin-bottom:16px;">Nuevo usuario registrado</h2>
           <div style="background:#f8f9fa;border-radius:8px;padding:20px;margin-bottom:20px;">
             <p style="margin:4px 0;"><strong>Nombre:</strong> ${userName}</p>
@@ -441,8 +388,8 @@ export class MailService {
             <p style="margin:4px 0;"><strong>Fecha:</strong> ${new Date().toLocaleString('es-AR')}</p>
           </div>
           ${role === 'caregiver' ? `<a href="${this.getFrontendUrl()}/admin/dashboard" style="display:inline-block;background:#0070f3;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Ver en Panel Admin</a>` : ''}
-        `),
-      });
+        `);
+      await this.sendEmail(adminEmail, `🆕 Nuevo registro: ${userName} (${roleLabel})`, adminHtml);
       this.logger.log(`Admin notification sent for new user: ${userEmail}`);
     } catch (error) {
       this.logger.error(`Failed to send admin notification for ${userEmail}`, error);
@@ -472,12 +419,7 @@ export class MailService {
           <p>Si creés que es un error, contactanos respondiendo a este email.</p>
         `;
 
-      await this.transporter.sendMail({
-        from: `"${this.fromName}" <${this.fromEmail}>`,
-        to: email,
-        subject,
-        html: this.baseLayout(body),
-      });
+      await this.sendEmail(email, subject, this.baseLayout(body));
       this.logger.log(`Account ${approved ? 'verified' : 'rejected'} email sent to ${email}`);
     } catch (error) {
       this.logger.error(`Failed to send verification email to ${email}`, error);
