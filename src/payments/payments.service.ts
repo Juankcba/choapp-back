@@ -274,12 +274,6 @@ export class PaymentsService {
                     caregiver: { include: { user: { select: { firstName: true, lastName: true, name: true } } } },
                 },
                 orderBy: { updatedAt: 'desc' },
-                select: {
-                    id: true, serviceType: true, patientName: true, amount: true,
-                    paymentStatus: true, paymentMethod: true, commissionFamily: true,
-                    duration: true, scheduledDate: true, updatedAt: true, createdAt: true,
-                    caregiver: { include: { user: { select: { firstName: true, lastName: true, name: true } } } },
-                },
             });
         } else {
             const caregiver = await this.prisma.caregiver.findUnique({ where: { userId } });
@@ -290,12 +284,6 @@ export class PaymentsService {
                     family: { include: { user: { select: { firstName: true, lastName: true, name: true } } } },
                 },
                 orderBy: { updatedAt: 'desc' },
-                select: {
-                    id: true, serviceType: true, patientName: true, amount: true,
-                    paymentStatus: true, commissionCarer: true, netAmount: true,
-                    duration: true, scheduledDate: true, updatedAt: true, releasedAt: true, createdAt: true,
-                    family: { include: { user: { select: { firstName: true, lastName: true, name: true } } } },
-                },
             });
         }
     }

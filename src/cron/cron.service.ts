@@ -27,13 +27,13 @@ export class CronService {
                     createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }, // last 7 days
                 },
                 include: {
-                    _count: { select: { notifications: true } },
+                    _count: { select: { serviceNotifications: true } },
                 },
             });
 
             // Only re-notify for services with few interested caregivers
             const needsMatching = pendingServices.filter(
-                (s) => (s as any)._count?.notifications < 5,
+                (s) => (s as any)._count?.serviceNotifications < 5,
             );
 
             if (needsMatching.length === 0) {
