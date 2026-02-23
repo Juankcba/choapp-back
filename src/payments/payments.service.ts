@@ -43,10 +43,15 @@ export class PaymentsService {
         if (!service) throw new NotFoundException('Service not found');
         if (service.family.userId !== familyUserId) throw new BadRequestException('Not your service');
         if (!service.caregiverId) throw new BadRequestException('No caregiver assigned');
-        if (!service.amount || service.amount <= 0) throw new BadRequestException('Service amount not set');
 
-        const commissionFamily = service.amount * this.COMMISSION_RATE;
-        const totalAmount = service.amount + commissionFamily;
+        // Calculate amount from caregiver's hourly rate × service duration
+        const caregiver = await this.prisma.caregiver.findUnique({ where: { id: service.caregiverId } });
+        if (!caregiver?.hourlyRate || caregiver.hourlyRate <= 0) throw new BadRequestException('Caregiver hourly rate not set');
+
+        const duration = service.duration || 1;
+        const serviceAmount = caregiver.hourlyRate * duration;
+        const commissionFamily = serviceAmount * this.COMMISSION_RATE;
+        const totalAmount = serviceAmount + commissionFamily;
 
         const serviceTypes: Record<string, string> = {
             elderly_care: 'Cuidado de Ancianos', special_needs: 'Necesidades Especiales',
@@ -60,7 +65,7 @@ export class PaymentsService {
                 items: [{
                     id: serviceId,
                     title: `Servicio CHO: ${serviceTypes[service.serviceType] || service.serviceType}`,
-                    description: `Cuidado para ${service.patientName || 'paciente'} - ${service.duration || 0}hs`,
+                    description: `Cuidado para ${service.patientName || 'paciente'} - ${duration}hs`,
                     quantity: 1,
                     unit_price: totalAmount,
                     currency_id: 'ARS',
@@ -80,14 +85,15 @@ export class PaymentsService {
             },
         });
 
-        // Save preference ID to service
+        // Save amounts to service
         await this.prisma.service.update({
             where: { id: serviceId },
             data: {
+                amount: serviceAmount,
                 mpPreferenceId: result.id,
                 commissionFamily,
-                commissionCarer: service.amount * this.COMMISSION_RATE,
-                netAmount: service.amount - (service.amount * this.COMMISSION_RATE),
+                commissionCarer: serviceAmount * this.COMMISSION_RATE,
+                netAmount: serviceAmount - (serviceAmount * this.COMMISSION_RATE),
             },
         });
 
@@ -99,8 +105,10 @@ export class PaymentsService {
             sandboxInitPoint: result.sandbox_init_point,
             totalAmount,
             breakdown: {
-                serviceAmount: service.amount,
+                serviceAmount,
                 familyCommission: commissionFamily,
+                carerCommission: serviceAmount * this.COMMISSION_RATE,
+                carerReceives: serviceAmount - (serviceAmount * this.COMMISSION_RATE),
                 total: totalAmount,
             },
         };
