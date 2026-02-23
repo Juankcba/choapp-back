@@ -315,6 +315,12 @@ export class MatchingService {
             data: { status: 'accepted', respondedAt: new Date() },
         });
 
+        // Get declined caregivers BEFORE updating them (so we can notify them)
+        const declinedNotifications = await this.prisma.serviceNotification.findMany({
+            where: { serviceId, caregiverId: { not: caregiverId }, status: 'interested' },
+            include: { caregiver: { select: { userId: true } } },
+        });
+
         // Mark all other interested notifications as declined
         await this.prisma.serviceNotification.updateMany({
             where: { serviceId, caregiverId: { not: caregiverId }, status: 'interested' },
@@ -349,6 +355,12 @@ export class MatchingService {
                     },
                 ).catch(e => this.logger.error('Failed to send caregiver selected email', e));
             }
+        }
+
+        // Notify declined caregivers via WebSocket
+        for (const declined of declinedNotifications) {
+            this.matchingGateway.emitToUser(declined.caregiver.userId, 'service-declined', { serviceId });
+            this.logger.log(`Notified declined caregiver ${declined.caregiverId} for service ${serviceId}`);
         }
 
         this.logger.log(`Family selected caregiver ${caregiverId} for service ${serviceId}`);
