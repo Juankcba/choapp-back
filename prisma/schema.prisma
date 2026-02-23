@@ -104,6 +104,9 @@ model Caregiver {
   earningsTotal      Float    @default(0)
   earningsPending    Float    @default(0)
   earningsAvailable  Float    @default(0)
+  bankCbu            String?
+  bankAlias          String?
+  bankName           String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 

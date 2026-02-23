@@ -19,7 +19,7 @@ export class AdminService {
                 this.prisma.family.count(),
                 this.prisma.service.count(),
                 this.prisma.service.count({ where: { status: { in: ['pending', 'matched', 'accepted', 'inProgress'] } } }),
-                this.prisma.service.count({ where: { paymentStatus: 'paid' } }),
+                this.prisma.service.count({ where: { paymentStatus: { in: ['paid', 'retenido'] } } }),
                 this.prisma.service.count({ where: { status: 'matched' } }),
             ]);
 
@@ -148,7 +148,7 @@ export class AdminService {
      */
     async getPaymentStats() {
         const services = await this.prisma.service.findMany({
-            where: { paymentStatus: { in: ['paid', 'released'] } },
+            where: { paymentStatus: { in: ['paid', 'retenido', 'released'] } },
             select: {
                 amount: true,
                 commissionFamily: true,
@@ -161,7 +161,7 @@ export class AdminService {
         const totalCollected = services.reduce((sum, s) => sum + (s.amount || 0) + (s.commissionFamily || 0), 0);
         const totalCommissions = services.reduce((sum, s) => sum + (s.commissionFamily || 0) + (s.commissionCarer || 0), 0);
         const totalReleased = services.filter(s => s.paymentStatus === 'released').reduce((sum, s) => sum + (s.netAmount || 0), 0);
-        const pendingRelease = services.filter(s => s.paymentStatus === 'paid').reduce((sum, s) => sum + (s.netAmount || 0), 0);
+        const pendingRelease = services.filter(s => s.paymentStatus === 'retenido' || s.paymentStatus === 'paid').reduce((sum, s) => sum + (s.netAmount || 0), 0);
 
         return {
             totalCollected,

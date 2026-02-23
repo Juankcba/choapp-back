@@ -26,6 +26,9 @@ export class CaregiversService {
         if (data.currentLocation?.lat !== undefined) mappedData.locationLat = data.currentLocation.lat;
         if (data.currentLocation?.lng !== undefined) mappedData.locationLng = data.currentLocation.lng;
         if (data.isAvailable !== undefined) mappedData.isAvailable = data.isAvailable;
+        if (data.bankCbu !== undefined) mappedData.bankCbu = data.bankCbu;
+        if (data.bankAlias !== undefined) mappedData.bankAlias = data.bankAlias;
+        if (data.bankName !== undefined) mappedData.bankName = data.bankName;
 
         return this.prisma.caregiver.upsert({
             where: { userId },

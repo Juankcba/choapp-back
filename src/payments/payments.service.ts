@@ -200,7 +200,7 @@ export class PaymentsService {
         });
 
         if (!service) throw new NotFoundException('Service not found');
-        if (service.paymentStatus !== 'paid') throw new BadRequestException('Payment not yet received');
+        if (service.paymentStatus !== 'retenido') throw new BadRequestException('Payment not in escrow');
         if (service.status !== 'completed') throw new BadRequestException('Service not completed');
 
         const updated = await this.prisma.service.update({
