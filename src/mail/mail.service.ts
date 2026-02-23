@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
+import * as dns from 'dns';
+
+// Force Node.js to resolve DNS to IPv4 first (Docker containers often lack IPv6)
+dns.setDefaultResultOrder('ipv4first');
 
 @Injectable()
 export class MailService {
