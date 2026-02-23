@@ -223,5 +223,35 @@ export class ServicesService {
 
         return notifications;
     }
+
+    async startService(userId: string, serviceId: string) {
+        const caregiver = await this.prisma.caregiver.findUnique({ where: { userId } });
+        if (!caregiver) throw new NotFoundException('Caregiver not found');
+
+        const service = await this.prisma.service.findUnique({ where: { id: serviceId } });
+        if (!service) throw new NotFoundException('Service not found');
+        if (service.caregiverId !== caregiver.id) throw new NotFoundException('Not your service');
+        if (service.status !== 'accepted') throw new NotFoundException('Service must be accepted to start');
+
+        return this.prisma.service.update({
+            where: { id: serviceId },
+            data: { status: 'in_progress', actualStart: new Date() },
+        });
+    }
+
+    async finishService(userId: string, serviceId: string) {
+        const caregiver = await this.prisma.caregiver.findUnique({ where: { userId } });
+        if (!caregiver) throw new NotFoundException('Caregiver not found');
+
+        const service = await this.prisma.service.findUnique({ where: { id: serviceId } });
+        if (!service) throw new NotFoundException('Service not found');
+        if (service.caregiverId !== caregiver.id) throw new NotFoundException('Not your service');
+        if (service.status !== 'in_progress') throw new NotFoundException('Service must be in progress to finish');
+
+        return this.prisma.service.update({
+            where: { id: serviceId },
+            data: { status: 'completed', actualEnd: new Date() },
+        });
+    }
 }
 

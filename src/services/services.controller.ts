@@ -88,4 +88,16 @@ export class ServicesController {
     ) {
         return this.servicesService.selectCaregiver(req.user.userId, id, body.caregiverId);
     }
+
+    @Post(':id/start')
+    @Roles('caregiver')
+    async startService(@Req() req: any, @Param('id') id: string) {
+        return this.servicesService.startService(req.user.userId, id);
+    }
+
+    @Post(':id/finish')
+    @Roles('caregiver')
+    async finishService(@Req() req: any, @Param('id') id: string) {
+        return this.servicesService.finishService(req.user.userId, id);
+    }
 }

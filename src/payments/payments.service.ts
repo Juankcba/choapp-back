@@ -136,7 +136,7 @@ export class PaymentsService {
                     const service = await this.prisma.service.update({
                         where: { id: serviceId },
                         data: {
-                            paymentStatus: 'paid',
+                            paymentStatus: 'retenido',
                             mpPaymentId: paymentId.toString(),
                             paymentMethod: payment.payment_method_id || 'mercadopago',
                         },
@@ -255,7 +255,7 @@ export class PaymentsService {
 
         // Already paid?
         if (service.paymentStatus === 'paid') {
-            return { status: 'already_paid', paymentStatus: 'paid' };
+            return { status: 'already_paid', paymentStatus: 'retenido' };
         }
 
         // If we have a preference ID, search for payments with that external_reference
@@ -287,7 +287,7 @@ export class PaymentsService {
                 await this.prisma.service.update({
                     where: { id: serviceId },
                     data: {
-                        paymentStatus: 'paid',
+                        paymentStatus: 'retenido',
                         mpPaymentId: approvedPayment.id.toString(),
                         paymentMethod: approvedPayment.payment_method_id || 'mercadopago',
                     },
@@ -322,7 +322,7 @@ export class PaymentsService {
                     }
                 }
 
-                return { status: 'confirmed', paymentStatus: 'paid' };
+                return { status: 'confirmed', paymentStatus: 'retenido' };
             }
 
             // Check for pending payment
