@@ -129,6 +129,7 @@ model Family {
 
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   services Service[]
+  reviews  Review[]
 }
 
 model Service {
@@ -197,15 +198,18 @@ type Message {
 model Review {
   id          String   @id @default(auto()) @map("_id") @db.ObjectId
   serviceId   String   @db.ObjectId
-  caregiverId String   @db.ObjectId
+  caregiverId String?  @db.ObjectId
+  familyId    String?  @db.ObjectId
   reviewerId  String   @db.ObjectId
+  reviewType  String   @default("family_to_caregiver") // family_to_caregiver | caregiver_to_family
   rating      Int
   comment     String?
   createdAt   DateTime @default(now())
 
-  service   Service   @relation(fields: [serviceId], references: [id])
-  caregiver Caregiver @relation(fields: [caregiverId], references: [id])
-  reviewer  User      @relation(fields: [reviewerId], references: [id])
+  service   Service    @relation(fields: [serviceId], references: [id])
+  caregiver Caregiver? @relation(fields: [caregiverId], references: [id])
+  family    Family?    @relation(fields: [familyId], references: [id])
+  reviewer  User       @relation(fields: [reviewerId], references: [id])
 }
 
 model ServiceNotification {

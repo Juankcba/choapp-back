@@ -10,8 +10,18 @@ export class ReviewsController {
         return this.reviewsService.create(req.user.userId, body);
     }
 
+    @Get('service/:serviceId')
+    async findByServiceId(@Param('serviceId') serviceId: string) {
+        return this.reviewsService.findByServiceId(serviceId);
+    }
+
     @Get('caregiver/:caregiverId')
     async findByCaregiverId(@Param('caregiverId') caregiverId: string) {
         return this.reviewsService.findByCaregiverId(caregiverId);
+    }
+
+    @Get('family/:familyId')
+    async findByFamilyId(@Param('familyId') familyId: string) {
+        return this.reviewsService.findByFamilyId(familyId);
     }
 }
