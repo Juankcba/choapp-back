@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { AdminService } from './admin.service';
 import { MailService } from '../mail/mail.service';
+import { PaymentsService } from '../payments/payments.service';
 import { Roles } from '../auth/decorators';
 import { RolesGuard } from '../auth/roles.guard';
 
@@ -19,6 +20,7 @@ export class AdminController {
     constructor(
         private readonly adminService: AdminService,
         private readonly mailService: MailService,
+        private readonly paymentsService: PaymentsService,
     ) { }
 
     @Get('stats')
@@ -42,6 +44,31 @@ export class AdminController {
     @Get('services/active')
     async getActiveServices() {
         return this.adminService.getActiveServices();
+    }
+
+    @Get('services/all')
+    async getAllServices() {
+        return this.adminService.getAllServices();
+    }
+
+    @Get('services/:id/chat')
+    async getServiceChat(@Param('id') id: string) {
+        return this.adminService.getServiceChat(id);
+    }
+
+    @Get('activity')
+    async getActivityLog(@Query('limit') limit?: string) {
+        return this.adminService.getActivityLog(parseInt(limit || '50'));
+    }
+
+    @Get('payments/stats')
+    async getPaymentStats() {
+        return this.adminService.getPaymentStats();
+    }
+
+    @Post('payments/:serviceId/release')
+    async releasePayment(@Param('serviceId') serviceId: string) {
+        return this.paymentsService.releasePayment(serviceId);
     }
 
     @Post('test-email')
