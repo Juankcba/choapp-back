@@ -10,6 +10,11 @@ export class ChatController {
         return this.chatService.getMessages(serviceId);
     }
 
+    @Get(':serviceId/messages')
+    async getChatMessages(@Param('serviceId') serviceId: string) {
+        return this.chatService.getMessages(serviceId);
+    }
+
     @Post(':serviceId/messages')
     async sendMessage(
         @Param('serviceId') serviceId: string,

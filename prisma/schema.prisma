@@ -136,7 +136,7 @@ model Service {
   familyId       String    @db.ObjectId
   caregiverId    String?   @db.ObjectId
   serviceType    String // companionship | medication | rehabilitation | postSurgery | specialCare
-  status         String    @default("pending") // pending | accepted | inProgress | completed | cancelled
+  status         String    @default("pending") // pending | matched | accepted | inProgress | completed | cancelled
   patientName    String?
   patientAge     Int?
   patientCondition String?
@@ -145,12 +145,28 @@ model Service {
   duration       Int? // in hours
   actualStart    DateTime?
   actualEnd      DateTime?
-  paymentMethod  String?
-  paymentStatus  String    @default("pending") // pending | paid | refunded
-  amount         Float?
   notes          String?
+
+  // Service location (where the service is performed, e.g. hospital, patient home)
+  serviceAddress     String?
+  serviceLocationLat Float?
+  serviceLocationLng Float?
+
+  // Family location (for matching)
   locationLat    Float?
   locationLng    Float?
+
+  // Payments
+  amount            Float?
+  paymentMethod     String?
+  paymentStatus     String    @default("pending") // pending | paid | released | refunded
+  mpPaymentId       String?
+  mpPreferenceId    String?
+  commissionFamily  Float?   // 10%
+  commissionCarer   Float?   // 10%
+  netAmount         Float?   // what caregiver receives
+  releasedAt        DateTime?
+
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 

@@ -265,6 +265,40 @@ export class MailService {
     }
   }
 
+  async sendPaymentReleasedEmail(
+    email: string,
+    name: string,
+    amount: number,
+    serviceId: string,
+  ): Promise<void> {
+    try {
+      await this.transporter.sendMail({
+        from: `"${this.fromName}" <${this.fromEmail}>`,
+        to: email,
+        subject: `💸 Pago liberado - $${amount.toLocaleString('es-AR')} - CHO`,
+        html: this.baseLayout(`
+          <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
+            Hola <strong>${name}</strong>, tu pago ha sido liberado:
+          </p>
+          <div style="margin:16px 0;padding:16px;background:#ecfdf5;border-radius:8px;text-align:center;">
+            <p style="margin:0;color:#065f46;font-size:28px;font-weight:bold;">
+              $${amount.toLocaleString('es-AR')}
+            </p>
+            <p style="margin:4px 0 0;color:#059669;font-size:14px;">Monto neto depositado</p>
+          </div>
+          <div style="margin:24px 0;text-align:center;">
+            <a href="${this.getFrontendUrl()}/caregiver/dashboard"
+               style="display:inline-block;background:#0070f3;color:white;text-decoration:none;padding:12px 32px;border-radius:8px;font-weight:600;font-size:15px;">
+              Ver Mis Trabajos
+            </a>
+          </div>`),
+      });
+      this.logger.log(`Payment released email sent to ${email}`);
+    } catch (error) {
+      this.logger.error(`Failed to send payment released email to ${email}`, error);
+    }
+  }
+
   private getFrontendUrl(): string {
     return this.configService.get<string>('FRONTEND_URL') || 'https://cho.bladelink.company';
   }
