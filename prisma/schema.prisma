@@ -81,6 +81,7 @@ model User {
   caregiver      Caregiver?
   family         Family?
   reviews        Review[]
+  fcmTokens      String[]
 }
 
 model Caregiver {
