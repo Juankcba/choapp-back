@@ -257,9 +257,17 @@ export class MatchingService {
                     caregiverId,
                 });
 
+                // Email family about interested caregiver
+                if (service.family.user.email) {
+                    const familyName = service.family.user.name || service.family.user.firstName || 'Familia';
+                    this.mailService.sendCaregiverInterestedEmail(
+                        service.family.user.email, familyName,
+                        { caregiverName, serviceType: serviceTypeName, serviceId },
+                    ).catch(e => this.logger.error('Failed to send caregiver interested email', e));
+                }
+
                 this.logger.log(`Notified family ${familyUserId} about interested caregiver ${caregiverId}`);
             }
-
             this.logger.log(`Caregiver ${caregiverId} interested in service ${serviceId}`);
         } else {
             this.logger.log(`Caregiver ${caregiverId} declined service ${serviceId}`);
@@ -293,10 +301,34 @@ export class MatchingService {
             data: { status: 'declined', respondedAt: new Date() },
         });
 
-        // Notify selected caregiver
-        const caregiver = await this.prisma.caregiver.findUnique({ where: { id: caregiverId } });
+        // Notify selected caregiver via WebSocket + Email
+        const caregiver = await this.prisma.caregiver.findUnique({
+            where: { id: caregiverId },
+            include: { user: { select: { email: true, firstName: true, lastName: true, name: true } } },
+        });
+        const service = await this.prisma.service.findUnique({
+            where: { id: serviceId },
+            include: { family: { include: { user: { select: { firstName: true, lastName: true, name: true } } } } },
+        });
+
         if (caregiver) {
             this.matchingGateway.emitToUser(caregiver.userId, 'service-confirmed', { serviceId });
+
+            // Email caregiver about selection
+            if (caregiver.user?.email) {
+                const caregiverName = caregiver.user.name || caregiver.user.firstName || 'Cuidador';
+                const familyName = service?.family?.user?.name ||
+                    `${service?.family?.user?.firstName || ''} ${service?.family?.user?.lastName || ''}`.trim() || 'Familia';
+                this.mailService.sendCaregiverSelectedEmail(
+                    caregiver.user.email, caregiverName,
+                    {
+                        familyName,
+                        serviceType: this.getServiceTypeName(service?.serviceType || ''),
+                        patientName: service?.patientName || 'paciente',
+                        serviceId,
+                    },
+                ).catch(e => this.logger.error('Failed to send caregiver selected email', e));
+            }
         }
 
         this.logger.log(`Family selected caregiver ${caregiverId} for service ${serviceId}`);

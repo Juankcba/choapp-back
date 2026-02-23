@@ -158,6 +158,23 @@ export class PaymentsService {
                             serviceId,
                             amount: payment.transaction_amount,
                         });
+
+                        // Email caregiver: payment received, start service
+                        if (service.caregiver.user.email) {
+                            const caregiverName = service.caregiver.user.firstName || service.caregiver.user.name || 'Cuidador';
+                            const familyName = service.family?.user?.name ||
+                                `${service.family?.user?.firstName || ''} ${service.family?.user?.lastName || ''}`.trim() || 'Familia';
+                            const serviceTypeName = this.getServiceTypeName(service.serviceType);
+                            this.mailService.sendPaymentReceivedEmail(
+                                service.caregiver.user.email, caregiverName,
+                                {
+                                    familyName,
+                                    serviceType: serviceTypeName,
+                                    amount: payment.transaction_amount || 0,
+                                    serviceId,
+                                },
+                            ).catch(e => this.logger.error('Failed to send payment received email', e));
+                        }
                     }
 
                     this.logger.log(`Payment approved for service ${serviceId}`);
@@ -242,5 +259,54 @@ export class PaymentsService {
 
         if (!service) throw new NotFoundException('Service not found');
         return service;
+    }
+
+    /**
+     * Get payment history for a user (family or caregiver)
+     */
+    async getPaymentHistory(userId: string, role: 'family' | 'caregiver') {
+        if (role === 'family') {
+            const family = await this.prisma.family.findUnique({ where: { userId } });
+            if (!family) return [];
+            return this.prisma.service.findMany({
+                where: { familyId: family.id, paymentStatus: { in: ['paid', 'released'] } },
+                include: {
+                    caregiver: { include: { user: { select: { firstName: true, lastName: true, name: true } } } },
+                },
+                orderBy: { updatedAt: 'desc' },
+                select: {
+                    id: true, serviceType: true, patientName: true, amount: true,
+                    paymentStatus: true, paymentMethod: true, commissionFamily: true,
+                    duration: true, scheduledDate: true, updatedAt: true, createdAt: true,
+                    caregiver: { include: { user: { select: { firstName: true, lastName: true, name: true } } } },
+                },
+            });
+        } else {
+            const caregiver = await this.prisma.caregiver.findUnique({ where: { userId } });
+            if (!caregiver) return [];
+            return this.prisma.service.findMany({
+                where: { caregiverId: caregiver.id, paymentStatus: { in: ['paid', 'released'] } },
+                include: {
+                    family: { include: { user: { select: { firstName: true, lastName: true, name: true } } } },
+                },
+                orderBy: { updatedAt: 'desc' },
+                select: {
+                    id: true, serviceType: true, patientName: true, amount: true,
+                    paymentStatus: true, commissionCarer: true, netAmount: true,
+                    duration: true, scheduledDate: true, updatedAt: true, releasedAt: true, createdAt: true,
+                    family: { include: { user: { select: { firstName: true, lastName: true, name: true } } } },
+                },
+            });
+        }
+    }
+
+    private getServiceTypeName(type: string): string {
+        const types: Record<string, string> = {
+            elderly_care: 'Cuidado de Ancianos', special_needs: 'Necesidades Especiales',
+            alzheimers: 'Alzheimer', physical_therapy: 'Terapia Física',
+            companionship: 'Compañía', personal_care: 'Cuidado Personal',
+            medication_management: 'Medicamentos', dementia_care: 'Demencia',
+        };
+        return types[type] || type;
     }
 }

@@ -32,4 +32,10 @@ export class PaymentsController {
     async getPaymentStatus(@Param('serviceId') serviceId: string) {
         return this.paymentsService.getPaymentStatus(serviceId);
     }
+
+    @Get('history/:role')
+    async getPaymentHistory(@Param('role') role: string, @Req() req: any) {
+        const validRole = role === 'caregiver' ? 'caregiver' : 'family';
+        return this.paymentsService.getPaymentHistory(req.user.userId, validRole);
+    }
 }

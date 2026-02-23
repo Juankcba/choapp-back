@@ -25,11 +25,12 @@ export class ServicesService {
                 specialNeeds: data.specialNeeds,
                 scheduledDate: data.scheduledDate ? new Date(data.scheduledDate) : null,
                 duration: data.duration,
-                paymentMethod: data.paymentMethod,
-                amount: data.amount,
                 notes: data.notes,
-                locationLat: data.locationLat || family.locationLat,
-                locationLng: data.locationLng || family.locationLng,
+                serviceAddress: data.serviceAddress,
+                serviceLocationLat: data.serviceLocationLat,
+                serviceLocationLng: data.serviceLocationLng,
+                locationLat: data.serviceLocationLat || data.locationLat || family.locationLat,
+                locationLng: data.serviceLocationLng || data.locationLng || family.locationLng,
             },
         });
 

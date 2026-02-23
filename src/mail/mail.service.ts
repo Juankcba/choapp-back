@@ -299,6 +299,122 @@ export class MailService {
     }
   }
 
+  // Email: Confirm service was created → to family
+  async sendServiceCreatedEmail(
+    email: string, name: string,
+    details: { serviceType: string; patientName: string; scheduledDate: Date | null; serviceId: string },
+  ): Promise<void> {
+    try {
+      const dateStr = details.scheduledDate
+        ? new Date(details.scheduledDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+        : 'A coordinar';
+      await this.transporter.sendMail({
+        from: `"${this.fromName}" <${this.fromEmail}>`,
+        to: email,
+        subject: `✅ Tu solicitud de servicio fue creada - CHO`,
+        html: this.baseLayout(`
+          <h2 style="margin:0 0 16px;color:#111827;font-size:22px;">¡Hola ${name}!</h2>
+          <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
+            Tu solicitud de <strong>${details.serviceType}</strong> para <strong>${details.patientName}</strong> fue creada correctamente.
+            Estamos buscando cuidadores cercanos para atenderte.
+          </p>
+          <div style="background:#f3f4f6;border-radius:12px;padding:20px;margin:0 0 24px;">
+            <p style="margin:0 0 8px;font-size:14px;color:#6b7280;">📅 Fecha: <strong>${dateStr}</strong></p>
+          </div>
+          <p style="margin:0 0 16px;color:#4b5563;font-size:15px;">Te notificaremos cuando un cuidador muestre interés.</p>
+          <a href="${this.getFrontendUrl()}/family/services/${details.serviceId}" style="display:inline-block;background:#6366f1;color:#fff;padding:12px 32px;border-radius:8px;text-decoration:none;font-weight:600;">Ver mi servicio</a>
+        `),
+      });
+      this.logger.log(`Service created email sent to ${email}`);
+    } catch (error) {
+      this.logger.error(`Failed to send service created email to ${email}`, error);
+    }
+  }
+
+  // Email: A caregiver is interested → to family
+  async sendCaregiverInterestedEmail(
+    email: string, familyName: string,
+    details: { caregiverName: string; serviceType: string; serviceId: string },
+  ): Promise<void> {
+    try {
+      await this.transporter.sendMail({
+        from: `"${this.fromName}" <${this.fromEmail}>`,
+        to: email,
+        subject: `👋 ${details.caregiverName} quiere cuidar a tu familiar - CHO`,
+        html: this.baseLayout(`
+          <h2 style="margin:0 0 16px;color:#111827;font-size:22px;">¡Hola ${familyName}!</h2>
+          <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
+            <strong>${details.caregiverName}</strong> ha mostrado interés en tu servicio de <strong>${details.serviceType}</strong>.
+          </p>
+          <p style="margin:0 0 16px;color:#4b5563;font-size:15px;">Podés chatear y ver su perfil para decidir si es la persona indicada.</p>
+          <a href="${this.getFrontendUrl()}/family/services/${details.serviceId}" style="display:inline-block;background:#6366f1;color:#fff;padding:12px 32px;border-radius:8px;text-decoration:none;font-weight:600;">Ver candidatos</a>
+        `),
+      });
+      this.logger.log(`Caregiver interested email sent to ${email}`);
+    } catch (error) {
+      this.logger.error(`Failed to send caregiver interested email to ${email}`, error);
+    }
+  }
+
+  // Email: Family selected this caregiver → to caregiver
+  async sendCaregiverSelectedEmail(
+    email: string, caregiverName: string,
+    details: { familyName: string; serviceType: string; patientName: string; serviceId: string },
+  ): Promise<void> {
+    try {
+      await this.transporter.sendMail({
+        from: `"${this.fromName}" <${this.fromEmail}>`,
+        to: email,
+        subject: `🎉 ¡Te seleccionaron para un servicio! - CHO`,
+        html: this.baseLayout(`
+          <h2 style="margin:0 0 16px;color:#111827;font-size:22px;">¡Felicidades ${caregiverName}!</h2>
+          <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
+            La familia <strong>${details.familyName}</strong> te ha seleccionado para cuidar a <strong>${details.patientName}</strong> (${details.serviceType}).
+          </p>
+          <p style="margin:0 0 16px;color:#4b5563;font-size:15px;">
+            El pago se realizará antes del servicio a través de MercadoPago. Una vez confirmado, podrás prestar el servicio.
+          </p>
+          <a href="${this.getFrontendUrl()}/caregiver/dashboard" style="display:inline-block;background:#6366f1;color:#fff;padding:12px 32px;border-radius:8px;text-decoration:none;font-weight:600;">Ir a mi panel</a>
+        `),
+      });
+      this.logger.log(`Caregiver selected email sent to ${email}`);
+    } catch (error) {
+      this.logger.error(`Failed to send caregiver selected email to ${email}`, error);
+    }
+  }
+
+  // Email: Payment received for this service → to caregiver
+  async sendPaymentReceivedEmail(
+    email: string, caregiverName: string,
+    details: { familyName: string; serviceType: string; amount: number; serviceId: string },
+  ): Promise<void> {
+    try {
+      await this.transporter.sendMail({
+        from: `"${this.fromName}" <${this.fromEmail}>`,
+        to: email,
+        subject: `💰 Pago recibido - ¡Prestá el servicio! - CHO`,
+        html: this.baseLayout(`
+          <h2 style="margin:0 0 16px;color:#111827;font-size:22px;">¡Hola ${caregiverName}!</h2>
+          <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
+            La familia <strong>${details.familyName}</strong> ha realizado el pago de <strong>$${details.amount.toLocaleString('es-AR')}</strong> por el servicio de <strong>${details.serviceType}</strong>.
+          </p>
+          <div style="background:#dcfce7;border-radius:12px;padding:20px;margin:0 0 24px;">
+            <p style="margin:0;font-size:15px;color:#166534;font-weight:600;">
+              ✅ El pago está confirmado. Ya podés coordinar y prestar el servicio.
+            </p>
+          </div>
+          <p style="margin:0 0 16px;color:#4b5563;font-size:15px;">
+            Una vez completado el servicio, el administrador liberará tu pago.
+          </p>
+          <a href="${this.getFrontendUrl()}/caregiver/dashboard" style="display:inline-block;background:#6366f1;color:#fff;padding:12px 32px;border-radius:8px;text-decoration:none;font-weight:600;">Ir a mi panel</a>
+        `),
+      });
+      this.logger.log(`Payment received email sent to ${email}`);
+    } catch (error) {
+      this.logger.error(`Failed to send payment received email to ${email}`, error);
+    }
+  }
+
   private getFrontendUrl(): string {
     return this.configService.get<string>('FRONTEND_URL') || 'https://cho.bladelink.company';
   }
