@@ -415,6 +415,69 @@ export class MailService {
     }
   }
 
+  // Email: Notify admin about new user registration
+  async sendNewUserNotificationToAdmin(
+    userName: string, userEmail: string, role: string,
+  ): Promise<void> {
+    const adminEmail = this.fromEmail; // Send to the app's admin email
+    try {
+      const roleLabel = role === 'caregiver' ? 'Cuidador' : 'Familia';
+      await this.transporter.sendMail({
+        from: `"${this.fromName}" <${this.fromEmail}>`,
+        to: adminEmail,
+        subject: `🆕 Nuevo registro: ${userName} (${roleLabel})`,
+        html: this.baseLayout(`
+          <h2 style="color:#333;margin-bottom:16px;">Nuevo usuario registrado</h2>
+          <div style="background:#f8f9fa;border-radius:8px;padding:20px;margin-bottom:20px;">
+            <p style="margin:4px 0;"><strong>Nombre:</strong> ${userName}</p>
+            <p style="margin:4px 0;"><strong>Email:</strong> ${userEmail}</p>
+            <p style="margin:4px 0;"><strong>Rol:</strong> ${roleLabel}</p>
+            <p style="margin:4px 0;"><strong>Fecha:</strong> ${new Date().toLocaleString('es-AR')}</p>
+          </div>
+          ${role === 'caregiver' ? `<a href="${this.getFrontendUrl()}/admin/dashboard" style="display:inline-block;background:#0070f3;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Ver en Panel Admin</a>` : ''}
+        `),
+      });
+      this.logger.log(`Admin notification sent for new user: ${userEmail}`);
+    } catch (error) {
+      this.logger.error(`Failed to send admin notification for ${userEmail}`, error);
+    }
+  }
+
+  // Email: Notify caregiver their account was verified/rejected
+  async sendAccountVerifiedEmail(
+    email: string, name: string, approved: boolean,
+  ): Promise<void> {
+    try {
+      const subject = approved
+        ? `✅ ¡Tu cuenta fue verificada, ${name}!`
+        : `❌ Actualización de tu cuenta, ${name}`;
+      const body = approved
+        ? `
+          <h2 style="color:#16a34a;margin-bottom:16px;">¡Felicitaciones, ${name}! 🎉</h2>
+          <p>Tu cuenta de cuidador fue <strong>verificada exitosamente</strong>.</p>
+          <p>Ya podés empezar a recibir solicitudes de trabajo de familias cerca tuyo.</p>
+          <div style="text-align:center;margin:24px 0;">
+            <a href="${this.getFrontendUrl()}/caregiver/dashboard" style="display:inline-block;background:#16a34a;color:white;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:bold;font-size:16px;">Ir al Dashboard</a>
+          </div>
+        `
+        : `
+          <h2 style="color:#dc2626;margin-bottom:16px;">Actualización de tu cuenta</h2>
+          <p>Hola ${name}, lamentablemente tu cuenta no pudo ser verificada en este momento.</p>
+          <p>Si creés que es un error, contactanos respondiendo a este email.</p>
+        `;
+
+      await this.transporter.sendMail({
+        from: `"${this.fromName}" <${this.fromEmail}>`,
+        to: email,
+        subject,
+        html: this.baseLayout(body),
+      });
+      this.logger.log(`Account ${approved ? 'verified' : 'rejected'} email sent to ${email}`);
+    } catch (error) {
+      this.logger.error(`Failed to send verification email to ${email}`, error);
+    }
+  }
+
   private getFrontendUrl(): string {
     return this.configService.get<string>('FRONTEND_URL') || 'https://cho.bladelink.company';
   }

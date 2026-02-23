@@ -12,6 +12,7 @@ import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
+import { MatchingGateway } from '../matching/matching.gateway';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
 
 @Injectable()
@@ -21,6 +22,7 @@ export class AuthService {
         private jwtService: JwtService,
         private configService: ConfigService,
         private mailService: MailService,
+        private matchingGateway: MatchingGateway,
     ) { }
 
     async register(dto: RegisterDto) {
@@ -54,6 +56,22 @@ export class AuthService {
 
             // Send welcome email (non-blocking)
             this.mailService.sendWelcomeEmail(user.email, user.name || user.firstName || 'Usuario');
+
+            // Notify admins in real-time
+            this.matchingGateway.emitToAdmins('new-user', {
+                id: user.id,
+                name: user.name || `${dto.firstName} ${dto.lastName}`,
+                email: user.email,
+                role: user.role,
+                createdAt: new Date().toISOString(),
+            });
+
+            // Email admin about new sign-up
+            this.mailService.sendNewUserNotificationToAdmin(
+                user.name || `${dto.firstName} ${dto.lastName}`,
+                user.email,
+                user.role,
+            ).catch(() => { /* non-blocking */ });
 
             const payload = { email: user.email, sub: user.id, role: user.role };
             return {

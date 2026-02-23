@@ -58,9 +58,10 @@ export class MatchingGateway implements OnGatewayConnection, OnGatewayDisconnect
 
         // Join personal room for targeted emissions
         client.join(`user_${userId}`);
-        // Also join role-specific room for backward compatibility
-        client.join(`caregiver_${userId}`);
-        this.logger.log(`User ${userId} registered (socket: ${client.id})`);
+        // Also join role-specific rooms
+        if (data.role === 'caregiver') client.join(`caregiver_${userId}`);
+        if (data.role === 'admin') client.join('admin_room');
+        this.logger.log(`User ${userId} registered (socket: ${client.id}, role: ${data.role || 'unknown'})`);
 
         return { status: 'ok' };
     }
@@ -84,5 +85,11 @@ export class MatchingGateway implements OnGatewayConnection, OnGatewayDisconnect
     /** Get count of online users */
     getOnlineCount(): number {
         return this.onlineUsers.size;
+    }
+
+    /** Emit an event to all connected admins */
+    emitToAdmins(event: string, data: any) {
+        this.server.to('admin_room').emit(event, data);
+        this.logger.log(`Emitted '${event}' to admin_room`);
     }
 }

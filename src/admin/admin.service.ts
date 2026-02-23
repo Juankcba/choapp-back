@@ -1,9 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { MatchingGateway } from '../matching/matching.gateway';
+import { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class AdminService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private matchingGateway: MatchingGateway,
+        private mailService: MailService,
+    ) { }
 
     async getStats() {
         const [totalUsers, totalCaregivers, totalFamilies, totalServices, activeServices, paidServices, matchedServices] =
@@ -34,10 +40,30 @@ export class AdminService {
     }
 
     async verifyCaregiver(caregiverId: string, approved: boolean) {
-        return this.prisma.caregiver.update({
+        const caregiver = await this.prisma.caregiver.update({
             where: { id: caregiverId },
             data: { verificationStatus: approved ? 'verified' : 'rejected' },
+            include: { user: true },
         });
+
+        // Notify caregiver in real-time
+        if (caregiver.user) {
+            this.matchingGateway.emitToUser(caregiver.userId, 'account-verified', {
+                status: approved ? 'verified' : 'rejected',
+                message: approved
+                    ? '¡Tu cuenta fue verificada! Ya podés recibir solicitudes de trabajo.'
+                    : 'Tu cuenta fue rechazada. Contactá soporte para más información.',
+            });
+
+            // Send email notification
+            this.mailService.sendAccountVerifiedEmail(
+                caregiver.user.email,
+                caregiver.user.name || caregiver.user.firstName || 'Cuidador',
+                approved,
+            ).catch(() => { /* non-blocking */ });
+        }
+
+        return caregiver;
     }
 
     async getActiveServices() {
