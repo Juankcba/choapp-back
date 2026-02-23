@@ -25,6 +25,29 @@ export class AuthService {
         private matchingGateway: MatchingGateway,
     ) { }
 
+    async getProfile(userId: string) {
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            include: {
+                caregiver: { select: { id: true } },
+                family: { select: { id: true } },
+            },
+        });
+        if (!user) throw new NotFoundException('User not found');
+        return {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            role: user.role,
+            caregiverId: user.caregiver?.id || null,
+            familyId: user.family?.id || null,
+            caregiver: user.caregiver,
+            family: user.family,
+        };
+    }
+
     async register(dto: RegisterDto) {
         try {
             const existing = await this.prisma.user.findUnique({
