@@ -1,9 +1,13 @@
 import { Controller, Get, Post, Body, Param, Req, Query } from '@nestjs/common';
 import { ChatService } from './chat.service';
+import { ChatGateway } from './chat.gateway';
 
 @Controller('chat')
 export class ChatController {
-    constructor(private readonly chatService: ChatService) { }
+    constructor(
+        private readonly chatService: ChatService,
+        private readonly chatGateway: ChatGateway,
+    ) { }
 
     /**
      * GET /chat/:serviceId/messages?caregiverId=XXX
@@ -32,6 +36,7 @@ export class ChatController {
 
     /**
      * POST /chat/:serviceId/messages?caregiverId=XXX
+     * Saves message and broadcasts via WebSocket so the web app gets it too
      */
     @Post(':serviceId/messages')
     async sendMessage(
@@ -43,6 +48,11 @@ export class ChatController {
         console.log('📨 Chat sendMessage:', { serviceId, caregiverId, userId: req.user?.userId, content: body.content?.substring(0, 20) });
         try {
             const result = await this.chatService.addMessage(serviceId, caregiverId, req.user.userId, body.content);
+
+            // Broadcast via WebSocket so web clients in this room see the message
+            const roomId = `chat_${serviceId}_${caregiverId}`;
+            this.chatGateway.server.to(roomId).emit('newMessage', result);
+
             return result;
         } catch (error) {
             console.error('❌ Chat sendMessage error:', error);

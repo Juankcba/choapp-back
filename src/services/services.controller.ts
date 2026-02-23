@@ -46,6 +46,12 @@ export class ServicesController {
         return this.servicesService.getInterestedForCaregiver(req.user.userId);
     }
 
+    @Get('active')
+    @Roles('caregiver')
+    async getActiveServices(@Req() req: any) {
+        return this.servicesService.findActiveForCaregiver(req.user.userId);
+    }
+
     @Get(':id')
     async findById(@Param('id') id: string) {
         return this.servicesService.findById(id);

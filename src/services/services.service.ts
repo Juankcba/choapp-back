@@ -61,6 +61,27 @@ export class ServicesService {
         });
     }
 
+    /**
+     * Get active services for a caregiver (accepted, in_progress, completed)
+     */
+    async findActiveForCaregiver(userId: string) {
+        const caregiver = await this.prisma.caregiver.findUnique({ where: { userId } });
+        if (!caregiver) throw new NotFoundException('Caregiver not found');
+
+        return this.prisma.service.findMany({
+            where: {
+                caregiverId: caregiver.id,
+                status: { in: ['accepted', 'in_progress', 'completed'] },
+            },
+            include: {
+                family: {
+                    include: { user: { select: { firstName: true, lastName: true, name: true, phone: true } } },
+                },
+            },
+            orderBy: { updatedAt: 'desc' },
+        });
+    }
+
     async findById(id: string) {
         const service = await this.prisma.service.findUnique({
             where: { id },
