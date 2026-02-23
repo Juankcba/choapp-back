@@ -52,3 +52,4 @@ certs/*.crt
 certs/production/
 
 /generated/prisma
+firebase-service-account.json

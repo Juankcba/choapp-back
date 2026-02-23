@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as admin from 'firebase-admin';
+import * as path from 'path';
+import * as fs from 'fs';
 
 @Injectable()
 export class UsersService {
@@ -9,10 +11,25 @@ export class UsersService {
     constructor(private prisma: PrismaService) {
         // Initialize Firebase Admin if not already initialized
         if (!admin.apps.length) {
-            admin.initializeApp({
-                projectId: process.env.FIREBASE_PROJECT_ID || 'cho-app-6cd59',
-            });
-            this.logger.log('Firebase Admin initialized');
+            try {
+                const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS
+                    || path.resolve(process.cwd(), 'firebase-service-account.json');
+
+                if (fs.existsSync(credPath)) {
+                    const serviceAccount = JSON.parse(fs.readFileSync(credPath, 'utf8'));
+                    admin.initializeApp({
+                        credential: admin.credential.cert(serviceAccount),
+                    });
+                    this.logger.log('Firebase Admin initialized with service account credentials');
+                } else {
+                    admin.initializeApp({
+                        projectId: process.env.FIREBASE_PROJECT_ID || 'cho-app-6cd59',
+                    });
+                    this.logger.warn('Firebase Admin initialized without credentials (push won\'t work)');
+                }
+            } catch (error) {
+                this.logger.error('Failed to initialize Firebase Admin', error);
+            }
         }
     }
 
