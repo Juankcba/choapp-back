@@ -80,8 +80,12 @@ export class AdminService {
     async getAllServices() {
         return this.prisma.service.findMany({
             include: {
-                family: { include: { user: { select: { firstName: true, lastName: true, name: true, email: true } } } },
-                caregiver: { include: { user: { select: { firstName: true, lastName: true, name: true, email: true } } } },
+                family: { include: { user: { select: { firstName: true, lastName: true, name: true, email: true, phone: true } } } },
+                caregiver: {
+                    include: {
+                        user: { select: { firstName: true, lastName: true, name: true, email: true, phone: true } },
+                    },
+                },
             },
             orderBy: { createdAt: 'desc' },
             take: 100,

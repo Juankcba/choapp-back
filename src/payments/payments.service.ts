@@ -369,7 +369,7 @@ export class PaymentsService {
             const family = await this.prisma.family.findUnique({ where: { userId } });
             if (!family) return [];
             return this.prisma.service.findMany({
-                where: { familyId: family.id, paymentStatus: { in: ['paid', 'released'] } },
+                where: { familyId: family.id, paymentStatus: { in: ['paid', 'retenido', 'released'] } },
                 include: {
                     caregiver: { include: { user: { select: { firstName: true, lastName: true, name: true } } } },
                 },
@@ -379,7 +379,7 @@ export class PaymentsService {
             const caregiver = await this.prisma.caregiver.findUnique({ where: { userId } });
             if (!caregiver) return [];
             return this.prisma.service.findMany({
-                where: { caregiverId: caregiver.id, paymentStatus: { in: ['paid', 'released'] } },
+                where: { caregiverId: caregiver.id, paymentStatus: { in: ['paid', 'retenido', 'released'] } },
                 include: {
                     family: { include: { user: { select: { firstName: true, lastName: true, name: true } } } },
                 },

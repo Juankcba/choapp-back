@@ -37,8 +37,18 @@ export class ChatService {
     async addMessage(serviceId: string, caregiverId: string, senderId: string, content: string) {
         const chat = await this.findOrCreateChat(serviceId, caregiverId);
 
+        // Resolve sender name from user record
+        const user = await this.prisma.user.findUnique({
+            where: { id: senderId },
+            select: { name: true, firstName: true, lastName: true },
+        });
+        const senderName = user?.name
+            || `${user?.firstName || ''} ${user?.lastName || ''}`.trim()
+            || 'Usuario';
+
         const newMessage = {
             senderId,
+            senderName,
             content,
             timestamp: new Date(),
             read: false,
