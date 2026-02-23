@@ -51,12 +51,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         this.logger.debug(`Client disconnected from /chat: ${client.id}`);
     }
 
+    /**
+     * Join a 1v1 chat room: `chat_${serviceId}_${caregiverId}`
+     */
     @SubscribeMessage('join')
     handleJoin(
         @ConnectedSocket() client: Socket,
-        @MessageBody() data: { serviceId: string; userId: string },
+        @MessageBody() data: { serviceId: string; caregiverId: string; userId: string },
     ) {
-        const roomId = `service_${data.serviceId}`;
+        const roomId = `chat_${data.serviceId}_${data.caregiverId}`;
         client.join(roomId);
         this.socketToUser.set(client.id, data.userId);
 
@@ -65,15 +68,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         }
         this.roomUsers.get(roomId)!.add(data.userId);
 
-        this.logger.log(`User ${data.userId} joined room ${roomId}`);
+        this.logger.log(`User ${data.userId} joined 1v1 room ${roomId}`);
     }
 
     @SubscribeMessage('leave')
     handleLeave(
         @ConnectedSocket() client: Socket,
-        @MessageBody() data: { serviceId: string },
+        @MessageBody() data: { serviceId: string; caregiverId: string },
     ) {
-        const roomId = `service_${data.serviceId}`;
+        const roomId = `chat_${data.serviceId}_${data.caregiverId}`;
         client.leave(roomId);
 
         const userId = this.socketToUser.get(client.id);
@@ -86,19 +89,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     async handleMessage(
         @ConnectedSocket() client: Socket,
         @MessageBody()
-        data: { serviceId: string; senderId: string; content: string },
+        data: { serviceId: string; caregiverId: string; senderId: string; content: string },
     ) {
         const message = await this.chatService.addMessage(
             data.serviceId,
+            data.caregiverId,
             data.senderId,
             data.content,
         );
 
-        const roomId = `service_${data.serviceId}`;
+        const roomId = `chat_${data.serviceId}_${data.caregiverId}`;
         this.server.to(roomId).emit('newMessage', message);
 
         // Check if the other party is online in this room, if not send email
-        this.notifyOfflineParty(data.serviceId, data.senderId, data.content);
+        this.notifyOfflineParty(data.serviceId, data.caregiverId, data.senderId, data.content);
 
         return message;
     }
@@ -106,17 +110,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @SubscribeMessage('typing')
     handleTyping(
         @ConnectedSocket() client: Socket,
-        @MessageBody() data: { serviceId: string; userId: string },
+        @MessageBody() data: { serviceId: string; caregiverId: string; userId: string },
     ) {
-        client.to(`service_${data.serviceId}`).emit('userTyping', {
+        client.to(`chat_${data.serviceId}_${data.caregiverId}`).emit('userTyping', {
             userId: data.userId,
         });
     }
 
     /**
-     * If the other user in the service chat is offline, send them an email
+     * If the other user in the 1v1 chat is offline, send them an email
      */
-    private async notifyOfflineParty(serviceId: string, senderId: string, content: string) {
+    private async notifyOfflineParty(serviceId: string, caregiverId: string, senderId: string, content: string) {
         try {
             const service = await this.prisma.service.findUnique({
                 where: { id: serviceId },
@@ -128,7 +132,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
             if (!service) return;
 
-            // Determine who to notify
+            const roomId = `chat_${serviceId}_${caregiverId}`;
             const familyUserId = service.family?.user?.id;
             const caregiverUserId = service.caregiver?.user?.id;
 
@@ -137,16 +141,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             let senderName = 'Usuario';
 
             if (senderId === familyUserId && caregiverUserId) {
-                // Family sent message → check if caregiver is online
-                const roomUsers = this.roomUsers.get(`service_${serviceId}`);
-                if (roomUsers?.has(caregiverUserId)) return; // online, skip email
+                const roomUsers = this.roomUsers.get(roomId);
+                if (roomUsers?.has(caregiverUserId)) return;
                 recipientEmail = service.caregiver?.user?.email;
                 recipientName = service.caregiver?.user?.name || service.caregiver?.user?.firstName || 'Cuidador';
                 senderName = service.family?.user?.name || service.family?.user?.firstName || 'Familia';
             } else if (senderId === caregiverUserId && familyUserId) {
-                // Caregiver sent message → check if family is online
-                const roomUsers = this.roomUsers.get(`service_${serviceId}`);
-                if (roomUsers?.has(familyUserId)) return; // online, skip email
+                const roomUsers = this.roomUsers.get(roomId);
+                if (roomUsers?.has(familyUserId)) return;
                 recipientEmail = service.family?.user?.email;
                 recipientName = service.family?.user?.name || service.family?.user?.firstName || 'Familia';
                 senderName = service.caregiver?.user?.name || service.caregiver?.user?.firstName || 'Cuidador';

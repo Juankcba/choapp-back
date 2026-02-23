@@ -5,15 +5,19 @@ import { PrismaService } from '../prisma/prisma.service';
 export class ChatService {
     constructor(private prisma: PrismaService) { }
 
-    async findOrCreateChat(serviceId: string) {
+    /**
+     * Find or create a 1v1 chat between a service and a specific caregiver.
+     */
+    async findOrCreateChat(serviceId: string, caregiverId: string) {
         let chat = await this.prisma.chat.findFirst({
-            where: { serviceId },
+            where: { serviceId, caregiverId },
         });
 
         if (!chat) {
             chat = await this.prisma.chat.create({
                 data: {
                     serviceId,
+                    caregiverId,
                     messages: [],
                 },
             });
@@ -22,16 +26,16 @@ export class ChatService {
         return chat;
     }
 
-    async getMessages(serviceId: string) {
+    async getMessages(serviceId: string, caregiverId: string) {
         const chat = await this.prisma.chat.findFirst({
-            where: { serviceId },
+            where: { serviceId, caregiverId },
         });
         if (!chat) return [];
         return chat.messages;
     }
 
-    async addMessage(serviceId: string, senderId: string, content: string) {
-        let chat = await this.findOrCreateChat(serviceId);
+    async addMessage(serviceId: string, caregiverId: string, senderId: string, content: string) {
+        const chat = await this.findOrCreateChat(serviceId, caregiverId);
 
         const newMessage = {
             senderId,
@@ -40,7 +44,7 @@ export class ChatService {
             read: false,
         };
 
-        chat = await this.prisma.chat.update({
+        await this.prisma.chat.update({
             where: { id: chat.id },
             data: {
                 messages: {
@@ -52,8 +56,8 @@ export class ChatService {
         return newMessage;
     }
 
-    async markAsRead(serviceId: string, userId: string) {
-        const chat = await this.prisma.chat.findFirst({ where: { serviceId } });
+    async markAsRead(serviceId: string, caregiverId: string, userId: string) {
+        const chat = await this.prisma.chat.findFirst({ where: { serviceId, caregiverId } });
         if (!chat) throw new NotFoundException('Chat not found');
 
         const updatedMessages = chat.messages.map((msg) => {
@@ -66,6 +70,18 @@ export class ChatService {
         return this.prisma.chat.update({
             where: { id: chat.id },
             data: { messages: updatedMessages },
+        });
+    }
+
+    /**
+     * Get all chats for a service (admin use)
+     */
+    async getChatsByService(serviceId: string) {
+        return this.prisma.chat.findMany({
+            where: { serviceId },
+            include: {
+                caregiver: { include: { user: { select: { firstName: true, lastName: true, name: true } } } },
+            },
         });
     }
 }
