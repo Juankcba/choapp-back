@@ -19,12 +19,14 @@ export class MailService {
     this.transporter = nodemailer.createTransport({
       host: 'smtp.gmail.com',
       port: 587,
-      secure: false, // use STARTTLS
+      secure: false,
       auth: { user, pass },
+      family: 4, // Force IPv4 (Docker containers often lack IPv6)
       connectionTimeout: 30000,
       greetingTimeout: 30000,
       socketTimeout: 30000,
-    });
+      tls: { rejectUnauthorized: false },
+    } as any);
 
     // Verify connection on startup
     this.transporter.verify().then(() => {
