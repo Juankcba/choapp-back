@@ -33,6 +33,11 @@ export class PaymentsController {
         return this.paymentsService.getPaymentStatus(serviceId);
     }
 
+    @Post(':serviceId/confirm')
+    async confirmPayment(@Param('serviceId') serviceId: string) {
+        return this.paymentsService.confirmPayment(serviceId);
+    }
+
     @Get('history/:role')
     async getPaymentHistory(@Param('role') role: string, @Req() req: any) {
         const validRole = role === 'caregiver' ? 'caregiver' : 'family';

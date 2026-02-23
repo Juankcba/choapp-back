@@ -18,8 +18,8 @@ export class MailService {
 
     this.transporter = nodemailer.createTransport({
       host: 'smtp.gmail.com',
-      port: 465,
-      secure: true,
+      port: 587,
+      secure: false, // use STARTTLS
       auth: { user, pass },
       connectionTimeout: 30000,
       greetingTimeout: 30000,

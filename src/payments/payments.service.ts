@@ -239,6 +239,106 @@ export class PaymentsService {
     }
 
     /**
+     * Confirm payment after MP redirect (fallback when webhook doesn't fire).
+     * Searches for an approved payment by the preference's external_reference.
+     */
+    async confirmPayment(serviceId: string) {
+        const service = await this.prisma.service.findUnique({
+            where: { id: serviceId },
+            include: {
+                family: { include: { user: true } },
+                caregiver: { include: { user: true } },
+            },
+        });
+
+        if (!service) throw new NotFoundException('Service not found');
+
+        // Already paid?
+        if (service.paymentStatus === 'paid') {
+            return { status: 'already_paid', paymentStatus: 'paid' };
+        }
+
+        // If we have a preference ID, search for payments with that external_reference
+        if (!service.mpPreferenceId) {
+            return { status: 'no_preference', paymentStatus: service.paymentStatus };
+        }
+
+        try {
+            // Search for payments with this service as external reference
+            const response = await fetch(
+                `https://api.mercadopago.com/v1/payments/search?external_reference=${serviceId}&sort=date_created&criteria=desc`,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${this.configService.get('MP_ACCESS_TOKEN')}`,
+                    },
+                },
+            );
+
+            if (!response.ok) {
+                this.logger.warn(`MP search failed: ${response.status}`);
+                return { status: 'search_failed', paymentStatus: service.paymentStatus };
+            }
+
+            const data = await response.json();
+            const approvedPayment = data.results?.find((p: any) => p.status === 'approved');
+
+            if (approvedPayment) {
+                // Found an approved payment — update the service
+                await this.prisma.service.update({
+                    where: { id: serviceId },
+                    data: {
+                        paymentStatus: 'paid',
+                        mpPaymentId: approvedPayment.id.toString(),
+                        paymentMethod: approvedPayment.payment_method_id || 'mercadopago',
+                    },
+                });
+
+                this.logger.log(`Payment confirmed via search for service ${serviceId}: MP payment ${approvedPayment.id}`);
+
+                // Notify both parties
+                if (service.family?.user) {
+                    this.matchingGateway.emitToUser(service.family.userId, 'payment-received', {
+                        serviceId,
+                        amount: approvedPayment.transaction_amount,
+                    });
+                }
+                if (service.caregiver?.user) {
+                    this.matchingGateway.emitToUser(service.caregiver.userId, 'payment-received', {
+                        serviceId,
+                        amount: approvedPayment.transaction_amount,
+                    });
+
+                    if (service.caregiver.user.email) {
+                        this.mailService.sendPaymentReceivedEmail(
+                            service.caregiver.user.email,
+                            service.caregiver.user.firstName || service.caregiver.user.name || 'Cuidador',
+                            {
+                                familyName: service.family?.user?.name || 'Familia',
+                                serviceType: this.getServiceTypeName(service.serviceType),
+                                amount: approvedPayment.transaction_amount || 0,
+                                serviceId,
+                            },
+                        ).catch(() => { });
+                    }
+                }
+
+                return { status: 'confirmed', paymentStatus: 'paid' };
+            }
+
+            // Check for pending payment
+            const pendingPayment = data.results?.find((p: any) => p.status === 'in_process' || p.status === 'pending');
+            if (pendingPayment) {
+                return { status: 'pending', paymentStatus: 'pending' };
+            }
+
+            return { status: 'not_found', paymentStatus: service.paymentStatus };
+        } catch (err) {
+            this.logger.error(`Error confirming payment: ${err.message}`);
+            return { status: 'error', paymentStatus: service.paymentStatus };
+        }
+    }
+
+    /**
      * Get payment status for a service
      */
     async getPaymentStatus(serviceId: string) {
