@@ -12,20 +12,31 @@ export class UsersService {
         // Initialize Firebase Admin if not already initialized
         if (!admin.apps.length) {
             try {
-                const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS
-                    || path.resolve(process.cwd(), 'firebase-service-account.json');
-
-                if (fs.existsSync(credPath)) {
-                    const serviceAccount = JSON.parse(fs.readFileSync(credPath, 'utf8'));
+                // Priority 1: Inline JSON from env var (for Docker/cloud deployments)
+                const inlineJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+                if (inlineJson) {
+                    const serviceAccount = JSON.parse(inlineJson);
                     admin.initializeApp({
                         credential: admin.credential.cert(serviceAccount),
                     });
-                    this.logger.log('Firebase Admin initialized with service account credentials');
+                    this.logger.log('Firebase Admin initialized from FIREBASE_SERVICE_ACCOUNT_JSON env var');
                 } else {
-                    admin.initializeApp({
-                        projectId: process.env.FIREBASE_PROJECT_ID || 'cho-app-6cd59',
-                    });
-                    this.logger.warn('Firebase Admin initialized without credentials (push won\'t work)');
+                    // Priority 2: File path
+                    const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS
+                        || path.resolve(process.cwd(), 'firebase-service-account.json');
+
+                    if (fs.existsSync(credPath)) {
+                        const serviceAccount = JSON.parse(fs.readFileSync(credPath, 'utf8'));
+                        admin.initializeApp({
+                            credential: admin.credential.cert(serviceAccount),
+                        });
+                        this.logger.log(`Firebase Admin initialized from file: ${credPath}`);
+                    } else {
+                        admin.initializeApp({
+                            projectId: process.env.FIREBASE_PROJECT_ID || 'cho-app-6cd59',
+                        });
+                        this.logger.warn('Firebase Admin initialized WITHOUT credentials — push notifications will NOT work!');
+                    }
                 }
             } catch (error) {
                 this.logger.error('Failed to initialize Firebase Admin', error);
