@@ -88,6 +88,8 @@ export class UsersService {
                 return;
             }
 
+            this.logger.log(`Sending push to ${userId} with ${user.fcmTokens.length} tokens: "${title}" — "${body}"`);
+
             const message: admin.messaging.MulticastMessage = {
                 tokens: user.fcmTokens,
                 notification: { title, body },
@@ -102,13 +104,25 @@ export class UsersService {
             };
 
             const response = await admin.messaging().sendEachForMulticast(message);
-            this.logger.log(`Push sent to ${userId}: ${response.successCount}/${user.fcmTokens.length} delivered`);
+            this.logger.log(`Push result for ${userId}: ${response.successCount} success, ${response.failureCount} failed out of ${user.fcmTokens.length}`);
+
+            // Log detailed per-token results
+            response.responses.forEach((resp, idx) => {
+                if (resp.success) {
+                    this.logger.log(`  Token ${idx}: ✅ messageId=${resp.messageId}`);
+                } else {
+                    this.logger.error(`  Token ${idx}: ❌ code=${resp.error?.code} msg=${resp.error?.message}`);
+                }
+            });
 
             // Clean up invalid tokens
             if (response.failureCount > 0) {
                 const invalidTokens: string[] = [];
                 response.responses.forEach((resp, idx) => {
-                    if (!resp.success && resp.error?.code === 'messaging/registration-token-not-registered') {
+                    if (!resp.success && (
+                        resp.error?.code === 'messaging/registration-token-not-registered' ||
+                        resp.error?.code === 'messaging/invalid-registration-token'
+                    )) {
                         invalidTokens.push(user.fcmTokens[idx]);
                     }
                 });
@@ -122,7 +136,7 @@ export class UsersService {
                 }
             }
         } catch (error) {
-            this.logger.error(`Failed to send push to user ${userId}`, error);
+            this.logger.error(`Failed to send push to user ${userId}:`, error?.message || error);
         }
     }
 }
