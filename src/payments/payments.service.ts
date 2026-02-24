@@ -363,15 +363,23 @@ export class PaymentsService {
 
     /**
      * Get payment history for a user (family or caregiver)
+     * Includes: paid/retenido/released services AND accepted/confirmed services pending payment
      */
     async getPaymentHistory(userId: string, role: 'family' | 'caregiver') {
         if (role === 'family') {
             const family = await this.prisma.family.findUnique({ where: { userId } });
             if (!family) return [];
             return this.prisma.service.findMany({
-                where: { familyId: family.id, paymentStatus: { in: ['paid', 'retenido', 'released'] } },
+                where: {
+                    familyId: family.id,
+                    OR: [
+                        { paymentStatus: { in: ['paid', 'retenido', 'released', 'pending'] } },
+                        { status: { in: ['accepted', 'confirmed'] } },
+                    ],
+                },
                 include: {
                     caregiver: { include: { user: { select: { firstName: true, lastName: true, name: true } } } },
+                    reviews: { select: { rating: true, comment: true, reviewType: true, createdAt: true } },
                 },
                 orderBy: { updatedAt: 'desc' },
             });
@@ -379,9 +387,16 @@ export class PaymentsService {
             const caregiver = await this.prisma.caregiver.findUnique({ where: { userId } });
             if (!caregiver) return [];
             return this.prisma.service.findMany({
-                where: { caregiverId: caregiver.id, paymentStatus: { in: ['paid', 'retenido', 'released'] } },
+                where: {
+                    caregiverId: caregiver.id,
+                    OR: [
+                        { paymentStatus: { in: ['paid', 'retenido', 'released', 'pending'] } },
+                        { status: { in: ['accepted', 'confirmed'] } },
+                    ],
+                },
                 include: {
                     family: { include: { user: { select: { firstName: true, lastName: true, name: true } } } },
+                    reviews: { select: { rating: true, comment: true, reviewType: true, createdAt: true } },
                 },
                 orderBy: { updatedAt: 'desc' },
             });
