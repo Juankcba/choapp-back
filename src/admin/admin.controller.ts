@@ -75,4 +75,14 @@ export class AdminController {
     async sendTestEmail(@Body() body: { email: string }) {
         return this.mailService.sendTestEmail(body.email);
     }
+
+    @Get('map-data')
+    async getMapData() {
+        return this.adminService.getMapData();
+    }
+
+    @Post('send-push')
+    async sendPush(@Body() body: { userId: string; title: string; message: string }) {
+        return this.adminService.sendPushNotification(body.userId, body.title, body.message);
+    }
 }

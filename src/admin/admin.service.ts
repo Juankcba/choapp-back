@@ -1,14 +1,18 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MatchingGateway } from '../matching/matching.gateway';
 import { MailService } from '../mail/mail.service';
+import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class AdminService {
+    private readonly logger = new Logger(AdminService.name);
+
     constructor(
         private prisma: PrismaService,
         private matchingGateway: MatchingGateway,
         private mailService: MailService,
+        private usersService: UsersService,
     ) { }
 
     async getStats() {
@@ -174,5 +178,103 @@ export class AdminService {
             pendingRelease,
             totalPaidServices: services.length,
         };
+    }
+
+    /**
+     * Map data: services + caregivers with locations
+     */
+    async getMapData() {
+        const [services, caregivers] = await Promise.all([
+            this.prisma.service.findMany({
+                where: {
+                    serviceLocationLat: { not: null },
+                    serviceLocationLng: { not: null },
+                },
+                select: {
+                    id: true,
+                    serviceType: true,
+                    status: true,
+                    paymentStatus: true,
+                    patientName: true,
+                    serviceAddress: true,
+                    serviceLocationLat: true,
+                    serviceLocationLng: true,
+                    duration: true,
+                    amount: true,
+                    createdAt: true,
+                    family: {
+                        include: {
+                            user: { select: { id: true, firstName: true, lastName: true, name: true, email: true } },
+                        },
+                    },
+                    caregiver: {
+                        include: {
+                            user: { select: { id: true, firstName: true, lastName: true, name: true } },
+                        },
+                    },
+                },
+                orderBy: { createdAt: 'desc' },
+                take: 200,
+            }),
+            this.prisma.caregiver.findMany({
+                where: {
+                    locationLat: { not: null },
+                    locationLng: { not: null },
+                    verificationStatus: 'verified',
+                },
+                select: {
+                    id: true,
+                    userId: true,
+                    locationLat: true,
+                    locationLng: true,
+                    specialties: true,
+                    hourlyRate: true,
+                    experience: true,
+                    isAvailable: true,
+                    user: { select: { id: true, firstName: true, lastName: true, name: true, email: true, fcmTokens: true } },
+                },
+            }),
+        ]);
+
+        return {
+            services: services.map(s => ({
+                ...s,
+                lat: s.serviceLocationLat,
+                lng: s.serviceLocationLng,
+                familyUserId: s.family?.user?.id,
+                familyName: s.family?.user?.name || `${s.family?.user?.firstName || ''} ${s.family?.user?.lastName || ''}`.trim() || 'Familia',
+                caregiverName: s.caregiver?.user?.name || `${s.caregiver?.user?.firstName || ''} ${s.caregiver?.user?.lastName || ''}`.trim() || null,
+            })),
+            caregivers: caregivers.map(c => ({
+                id: c.id,
+                userId: c.userId,
+                lat: c.locationLat,
+                lng: c.locationLng,
+                name: c.user?.name || `${c.user?.firstName || ''} ${c.user?.lastName || ''}`.trim() || 'Cuidador',
+                email: c.user?.email,
+                specialties: c.specialties || [],
+                hourlyRate: c.hourlyRate,
+                experience: c.experience,
+                isAvailable: c.isAvailable,
+                hasPushToken: (c.user?.fcmTokens || []).length > 0,
+            })),
+        };
+    }
+
+    /**
+     * Send push notification to a specific user
+     */
+    async sendPushNotification(userId: string, title: string, body: string) {
+        this.logger.log(`Admin sending push to user ${userId}: ${title}`);
+        await this.usersService.sendPushToUser(userId, title, body, { type: 'admin-message' });
+
+        // Also emit via WebSocket for instant in-app feedback
+        this.matchingGateway.emitToUser(userId, 'notification', {
+            title,
+            body,
+            type: 'admin-message',
+        });
+
+        return { success: true, message: `Notificación enviada` };
     }
 }

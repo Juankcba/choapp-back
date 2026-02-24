@@ -1,6 +1,9 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MatchingService } from '../matching/matching.service';
+import { MatchingGateway } from '../matching/matching.gateway';
+import { MailService } from '../mail/mail.service';
+import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class ServicesService {
@@ -9,6 +12,9 @@ export class ServicesService {
     constructor(
         private prisma: PrismaService,
         private matchingService: MatchingService,
+        private matchingGateway: MatchingGateway,
+        private mailService: MailService,
+        private usersService: UsersService,
     ) { }
 
     async create(userId: string, data: any) {
@@ -261,18 +267,74 @@ export class ServicesService {
     }
 
     async finishService(userId: string, serviceId: string) {
-        const caregiver = await this.prisma.caregiver.findUnique({ where: { userId } });
+        const caregiver = await this.prisma.caregiver.findUnique({
+            where: { userId },
+            include: { user: { select: { firstName: true, lastName: true, name: true } } },
+        });
         if (!caregiver) throw new NotFoundException('Caregiver not found');
 
-        const service = await this.prisma.service.findUnique({ where: { id: serviceId } });
+        const service = await this.prisma.service.findUnique({
+            where: { id: serviceId },
+            include: {
+                family: { include: { user: { select: { id: true, email: true, firstName: true, lastName: true, name: true } } } },
+            },
+        });
         if (!service) throw new NotFoundException('Service not found');
         if (service.caregiverId !== caregiver.id) throw new NotFoundException('Not your service');
         if (service.status !== 'in_progress') throw new NotFoundException('Service must be in progress to finish');
 
-        return this.prisma.service.update({
+        const updated = await this.prisma.service.update({
             where: { id: serviceId },
             data: { status: 'completed', actualEnd: new Date() },
         });
+
+        // 🔔 Notify family that the service was completed
+        const familyUserId = service.family?.user?.id;
+        const caregiverName = caregiver.user?.name ||
+            `${caregiver.user?.firstName || ''} ${caregiver.user?.lastName || ''}`.trim() || 'El cuidador';
+        const serviceTypeName = this.getServiceTypeName(service.serviceType);
+
+        if (familyUserId) {
+            // WebSocket notification
+            this.matchingGateway.emitToUser(familyUserId, 'service-completed', {
+                serviceId,
+                serviceType: serviceTypeName,
+                caregiverName,
+            });
+
+            // Push notification
+            this.usersService.sendPushToUser(
+                familyUserId,
+                '✅ Servicio completado',
+                `${caregiverName} finalizó el servicio de ${serviceTypeName}`,
+                { type: 'service-completed', serviceId },
+            ).catch(e => this.logger.error('Push failed for family (service completed)', e));
+
+            // Email notification
+            if (service.family?.user?.email) {
+                const familyName = service.family.user.name || service.family.user.firstName || 'Familia';
+                this.mailService.sendServiceCompletedEmail(
+                    service.family.user.email, familyName,
+                    { caregiverName, serviceType: serviceTypeName, serviceId },
+                ).catch(e => this.logger.error('Email failed for family (service completed)', e));
+            }
+        }
+
+        return updated;
+    }
+
+    private getServiceTypeName(type: string): string {
+        const types: Record<string, string> = {
+            elderly_care: 'Cuidado de Ancianos',
+            special_needs: 'Necesidades Especiales',
+            alzheimers: 'Alzheimer y Demencia',
+            physical_therapy: 'Terapia Física',
+            medication_management: 'Administración de Medicamentos',
+            companionship: 'Compañía',
+            personal_care: 'Cuidado Personal',
+            dementia_care: 'Cuidado de Demencia',
+        };
+        return types[type] || type;
     }
 }
 

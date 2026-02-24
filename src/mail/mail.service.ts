@@ -426,6 +426,36 @@ export class MailService {
     }
   }
 
+  // Email: Service completed → to family
+  async sendServiceCompletedEmail(
+    email: string, familyName: string,
+    details: { caregiverName: string; serviceType: string; serviceId: string },
+  ): Promise<void> {
+    try {
+      const completedHtml = this.baseLayout(`
+          <h2 style="margin:0 0 16px;color:#111827;font-size:22px;">¡Hola ${familyName}!</h2>
+          <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
+            <strong>${details.caregiverName}</strong> ha finalizado el servicio de <strong>${details.serviceType}</strong>.
+          </p>
+          <div style="background:#ecfdf5;border-radius:12px;padding:20px;margin:0 0 24px;text-align:center;">
+            <p style="margin:0;color:#065f46;font-size:18px;font-weight:600;">✅ Servicio completado</p>
+            <p style="margin:8px 0 0;color:#059669;font-size:14px;">Ya podés dejar una reseña sobre el cuidador</p>
+          </div>
+          <div style="text-align:center;margin:0 0 24px;">
+            <a href="${this.getFrontendUrl()}/family/services/${details.serviceId}" style="display:inline-block;background:#6366f1;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:600;font-size:15px;">
+              Ver Servicio y Dejar Reseña
+            </a>
+          </div>
+          <p style="margin:0;color:#9ca3af;font-size:13px;text-align:center;">
+            ¡Gracias por confiar en CHO!
+          </p>`);
+      await this.sendEmail(email, `✅ Servicio completado - ${details.serviceType} - CHO`, completedHtml);
+      this.logger.log(`Service completed email sent to ${email}`);
+    } catch (error) {
+      this.logger.error(`Failed to send service completed email to ${email}`, error);
+    }
+  }
+
   private getFrontendUrl(): string {
     return this.configService.get<string>('FRONTEND_URL') || 'https://cho.bladelink.company';
   }
