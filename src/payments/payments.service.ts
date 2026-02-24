@@ -366,10 +366,12 @@ export class PaymentsService {
      * Includes: paid/retenido/released services AND accepted/confirmed services pending payment
      */
     async getPaymentHistory(userId: string, role: 'family' | 'caregiver') {
+        let services: any[];
+
         if (role === 'family') {
             const family = await this.prisma.family.findUnique({ where: { userId } });
             if (!family) return [];
-            return this.prisma.service.findMany({
+            services = await this.prisma.service.findMany({
                 where: {
                     familyId: family.id,
                     OR: [
@@ -378,7 +380,9 @@ export class PaymentsService {
                     ],
                 },
                 include: {
-                    caregiver: { include: { user: { select: { firstName: true, lastName: true, name: true } } } },
+                    caregiver: {
+                        select: { hourlyRate: true, user: { select: { firstName: true, lastName: true, name: true } } },
+                    },
                     reviews: { select: { rating: true, comment: true, reviewType: true, createdAt: true } },
                 },
                 orderBy: { updatedAt: 'desc' },
@@ -386,7 +390,7 @@ export class PaymentsService {
         } else {
             const caregiver = await this.prisma.caregiver.findUnique({ where: { userId } });
             if (!caregiver) return [];
-            return this.prisma.service.findMany({
+            services = await this.prisma.service.findMany({
                 where: {
                     caregiverId: caregiver.id,
                     OR: [
@@ -396,11 +400,22 @@ export class PaymentsService {
                 },
                 include: {
                     family: { include: { user: { select: { firstName: true, lastName: true, name: true } } } },
+                    caregiver: { select: { hourlyRate: true } },
                     reviews: { select: { rating: true, comment: true, reviewType: true, createdAt: true } },
                 },
                 orderBy: { updatedAt: 'desc' },
             });
         }
+
+        // Enrich: calculate estimated amount for services missing it
+        return services.map(s => {
+            if (!s.amount && s.caregiver?.hourlyRate) {
+                const duration = s.duration || 1;
+                s.amount = s.caregiver.hourlyRate * duration;
+                s.estimatedAmount = true; // flag so UI can show "estimado"
+            }
+            return s;
+        });
     }
 
     private getServiceTypeName(type: string): string {
