@@ -265,8 +265,28 @@ export class AdminService {
      * Send push notification to a specific user
      */
     async sendPushNotification(userId: string, title: string, body: string) {
-        this.logger.log(`Admin sending push to user ${userId}: ${title}`);
-        await this.usersService.sendPushToUser(userId, title, body, { type: 'admin-message' });
+        this.logger.log(`Admin sending push to user ${userId}: ${title} — ${body}`);
+
+        // Check user exists and has FCM tokens
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: { id: true, fcmTokens: true, name: true, firstName: true },
+        });
+
+        if (!user) {
+            this.logger.warn(`User ${userId} not found`);
+            return { success: false, message: 'Usuario no encontrado' };
+        }
+
+        const hasTokens = user.fcmTokens && user.fcmTokens.length > 0;
+        this.logger.log(`User ${userId} has ${user.fcmTokens?.length || 0} FCM tokens`);
+
+        // Send push (will log if no tokens)
+        try {
+            await this.usersService.sendPushToUser(userId, title, body, { type: 'admin-message' });
+        } catch (error) {
+            this.logger.error(`Push send error for ${userId}:`, error);
+        }
 
         // Also emit via WebSocket for instant in-app feedback
         this.matchingGateway.emitToUser(userId, 'notification', {
@@ -275,6 +295,13 @@ export class AdminService {
             type: 'admin-message',
         });
 
-        return { success: true, message: `Notificación enviada` };
+        return {
+            success: true,
+            message: hasTokens
+                ? `Push + WebSocket enviados a ${user.name || user.firstName || userId}`
+                : `Solo WebSocket enviado (usuario sin token push)`,
+            hasPushToken: hasTokens,
+            tokenCount: user.fcmTokens?.length || 0,
+        };
     }
 }
