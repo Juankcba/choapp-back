@@ -41,6 +41,7 @@ export class AuthService {
             firstName: user.firstName,
             lastName: user.lastName,
             role: user.role,
+            identityStatus: user.identityStatus,
             caregiverId: user.caregiver?.id || null,
             familyId: user.family?.id || null,
             caregiver: user.caregiver,
@@ -99,7 +100,7 @@ export class AuthService {
             const payload = { email: user.email, sub: user.id, role: user.role };
             return {
                 access_token: this.jwtService.sign(payload),
-                user: { id: user.id, email: user.email, role: user.role, name: user.name },
+                user: { id: user.id, email: user.email, role: user.role, name: user.name, identityStatus: user.identityStatus },
             };
         } catch (error) {
             if (error instanceof ConflictException) throw error;
@@ -131,7 +132,7 @@ export class AuthService {
         const payload = { email: user.email, sub: user.id, role: user.role };
         return {
             access_token: this.jwtService.sign(payload),
-            user: { id: user.id, email: user.email, role: user.role, name: user.name },
+            user: { id: user.id, email: user.email, role: user.role, name: user.name, identityStatus: user.identityStatus },
         };
     }
 
@@ -181,7 +182,7 @@ export class AuthService {
         const payload = { email: user.email, sub: user.id, role };
         return {
             access_token: this.jwtService.sign(payload),
-            user: { id: user.id, email: user.email, role, name: user.name || data.name },
+            user: { id: user.id, email: user.email, role, name: user.name || data.name, identityStatus: user.identityStatus },
         };
     }
 

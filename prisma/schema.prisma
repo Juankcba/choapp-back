@@ -71,6 +71,11 @@ model User {
   name          String?
   image         String?
   isActive      Boolean   @default(true)
+  // Identity verification (KYC via Didit)
+  dni                   String?   @unique
+  identityStatus        String    @default("unverified") // unverified | pending | verified | rejected
+  diditSessionId        String?
+  diditVerifiedAt       DateTime?
   lastLogin     DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt

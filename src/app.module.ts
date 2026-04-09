@@ -17,6 +17,7 @@ import { CronModule } from './cron/cron.module';
 import { BlogModule } from './blog/blog.module';
 import { CareersModule } from './careers/careers.module';
 import { PressModule } from './press/press.module';
+import { VerificationModule } from './verification/verification.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { PressModule } from './press/press.module';
     BlogModule,
     CareersModule,
     PressModule,
+    VerificationModule,
   ],
 })
 export class AppModule { }
