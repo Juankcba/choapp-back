@@ -87,13 +87,13 @@ export class VerificationService {
                 ),
             );
 
-            const { verification_url, session_token } = response.data;
+            const { url, session_token, session_id } = response.data;
 
             // Update user with session info
             await this.prisma.user.update({
                 where: { id: userId },
                 data: {
-                    diditSessionId: session_token || response.data.session_id,
+                    diditSessionId: session_token || session_id,
                     identityStatus: 'pending',
                 },
             });
@@ -101,8 +101,8 @@ export class VerificationService {
             this.logger.log(`Verification session created for user ${userId}`);
 
             return {
-                verificationUrl: verification_url,
-                sessionId: session_token || response.data.session_id,
+                verificationUrl: url,
+                sessionId: session_token || session_id,
             };
         } catch (error) {
             this.logger.error(`Failed to create Didit session for user ${userId}`, error?.response?.data || error.message);
