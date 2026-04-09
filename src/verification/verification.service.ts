@@ -87,7 +87,7 @@ export class VerificationService {
                 ),
             );
 
-            const { session_url, session_token } = response.data;
+            const { verification_url, session_token } = response.data;
 
             // Update user with session info
             await this.prisma.user.update({
@@ -101,7 +101,7 @@ export class VerificationService {
             this.logger.log(`Verification session created for user ${userId}`);
 
             return {
-                verificationUrl: session_url,
+                verificationUrl: verification_url,
                 sessionId: session_token || response.data.session_id,
             };
         } catch (error) {
