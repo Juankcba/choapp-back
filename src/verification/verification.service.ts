@@ -116,12 +116,15 @@ export class VerificationService {
     async handleWebhook(payload: any) {
         this.logger.log(`Didit webhook received: ${JSON.stringify(payload)}`);
 
-        const sessionId = payload.session_id || payload.session_token;
-        const status = payload.status; // "Approved", "Declined", "In Progress"
-        const vendorData = payload.vendor_data; // userId
+        // Check for nested 'session' object if using v3 specific event types
+        const sessionPayload = payload.session || payload;
+
+        const sessionId = sessionPayload.session_id || sessionPayload.session_token || sessionPayload.id;
+        const status = sessionPayload.status || payload.status; // "Approved", "Declined", "In Progress"
+        const vendorData = sessionPayload.vendor_data || payload.vendor_data; // userId
 
         if (!vendorData && !sessionId) {
-            this.logger.warn('Webhook missing vendor_data and session_id');
+            this.logger.warn('Webhook missing vendor_data and session_id. This is normal if this was a test webhook from Didit console.');
             return { received: true };
         }
 
@@ -141,16 +144,18 @@ export class VerificationService {
 
         // Map Didit status to our status
         let identityStatus = user.identityStatus;
-        if (status === 'Approved' || status === 'approved') {
+        if (status === 'Approved' || status === 'approved' || status === 'APPROVED') {
             identityStatus = 'verified';
-        } else if (status === 'Declined' || status === 'declined') {
+        } else if (status === 'Declined' || status === 'declined' || status === 'DECLINED') {
             identityStatus = 'rejected';
-        } else if (status === 'In Progress' || status === 'in_progress') {
+        } else if (status === 'In Progress' || status === 'in_progress' || status === 'IN_PROGRESS') {
             identityStatus = 'pending';
+        } else if (status) {
+            this.logger.warn(`Unknown Didit status received: ${status}, keeping current status: ${identityStatus}`);
         }
 
         // Extract DNI from document data if available
-        const dni = payload.document_number || payload.documents?.[0]?.document_number || null;
+        const dni = sessionPayload.document_number || sessionPayload.documents?.[0]?.document_number || payload.document_number || null;
 
         const updateData: any = {
             identityStatus,
