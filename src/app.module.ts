@@ -14,6 +14,9 @@ import { AdminModule } from './admin/admin.module';
 import { MatchingModule } from './matching/matching.module';
 import { PaymentsModule } from './payments/payments.module';
 import { CronModule } from './cron/cron.module';
+import { BlogModule } from './blog/blog.module';
+import { CareersModule } from './careers/careers.module';
+import { PressModule } from './press/press.module';
 
 @Module({
   imports: [
@@ -32,6 +35,9 @@ import { CronModule } from './cron/cron.module';
     MatchingModule,
     PaymentsModule,
     CronModule,
+    BlogModule,
+    CareersModule,
+    PressModule,
   ],
 })
 export class AppModule { }

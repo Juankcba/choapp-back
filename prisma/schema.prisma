@@ -236,3 +236,54 @@ model ServiceNotification {
   service   Service   @relation(fields: [serviceId], references: [id])
   caregiver Caregiver @relation(fields: [caregiverId], references: [id])
 }
+
+// ─── CMS Models ─────────────────────────────────────────
+
+model BlogPost {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  title       String
+  slug        String    @unique
+  excerpt     String
+  content     String
+  imageUrl    String?
+  category    String
+  authorName  String
+  published   Boolean   @default(false)
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model JobPosting {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  title        String
+  type         String   // full-time | part-time | contract
+  location     String
+  description  String
+  requirements String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model PressRelease {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  title       String
+  summary     String
+  content     String?
+  imageUrl    String?
+  publishedAt DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ─── OTP Model ──────────────────────────────────────────
+
+model OtpCode {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  email     String
+  code      String
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}

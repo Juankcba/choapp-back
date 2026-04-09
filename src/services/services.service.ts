@@ -136,8 +136,10 @@ export class ServicesService {
         if (!service) throw new NotFoundException('Service not found');
         if (service.familyId !== family.id) throw new NotFoundException('Service not found');
 
-        // Delete related notifications first
+        // Delete all related records first to avoid foreign key constraints
         await this.prisma.serviceNotification.deleteMany({ where: { serviceId } });
+        await this.prisma.chat.deleteMany({ where: { serviceId } });
+        await this.prisma.review.deleteMany({ where: { serviceId } });
 
         return this.prisma.service.delete({ where: { id: serviceId } });
     }
