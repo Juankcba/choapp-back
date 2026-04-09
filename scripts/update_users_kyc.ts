@@ -3,19 +3,19 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 async function updateUsers() {
-  console.log('Starting user update...');
+  console.log('Starting user update with raw MongoDB query...');
   try {
-    const result = await prisma.user.updateMany({
-      where: {
-        identityStatus: {
-          notIn: ['verified', 'pending', 'rejected']
-        } // This catches null, undefined, unverified, or missing.
-      },
-      data: {
-        identityStatus: 'unverified'
-      }
+    const result = await prisma.$runCommandRaw({
+      update: 'User',
+      updates: [
+        {
+          q: { identityStatus: { $exists: false } },
+          u: { $set: { identityStatus: 'unverified' } },
+          multi: true
+        }
+      ]
     });
-    console.log(`Successfully updated ${result.count} users to "unverified" status.`);
+    console.log(`Command result:`, result);
   } catch (error) {
     console.error('Error updating users:', error);
   } finally {
