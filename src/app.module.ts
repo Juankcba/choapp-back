@@ -18,11 +18,13 @@ import { BlogModule } from './blog/blog.module';
 import { CareersModule } from './careers/careers.module';
 import { PressModule } from './press/press.module';
 import { VerificationModule } from './verification/verification.module';
+import { TelegramModule } from './telegram/telegram.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
+    TelegramModule,
     PrismaModule,
     MailModule,
     AuthModule,

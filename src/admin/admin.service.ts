@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MatchingGateway } from '../matching/matching.gateway';
 import { MailService } from '../mail/mail.service';
 import { UsersService } from '../users/users.service';
+import { TelegramService } from '../telegram/telegram.service';
 
 @Injectable()
 export class AdminService {
@@ -13,6 +14,7 @@ export class AdminService {
         private matchingGateway: MatchingGateway,
         private mailService: MailService,
         private usersService: UsersService,
+        private telegramService: TelegramService,
     ) { }
 
     async getStats() {
@@ -65,9 +67,150 @@ export class AdminService {
                 caregiver.user.name || caregiver.user.firstName || 'Cuidador',
                 approved,
             ).catch(() => { /* non-blocking */ });
+
+            // Log to Telegram
+            this.telegramService.sendLog(approved ? 'caregiver.verified' : 'caregiver.rejected', {
+                name: caregiver.user.name || caregiver.user.firstName || 'Cuidador',
+                email: caregiver.user.email,
+            }).catch(() => { /* non-blocking */ });
         }
 
         return caregiver;
+    }
+
+    // ─── User Management ─────────────────────────
+
+    async getUsers(filters?: { role?: string; isActive?: string; identityStatus?: string; search?: string }) {
+        const where: any = {};
+
+        if (filters?.role) where.role = filters.role;
+        if (filters?.isActive !== undefined) where.isActive = filters.isActive === 'true';
+        if (filters?.identityStatus) where.identityStatus = filters.identityStatus;
+        if (filters?.search) {
+            where.OR = [
+                { email: { contains: filters.search, mode: 'insensitive' } },
+                { firstName: { contains: filters.search, mode: 'insensitive' } },
+                { lastName: { contains: filters.search, mode: 'insensitive' } },
+                { name: { contains: filters.search, mode: 'insensitive' } },
+            ];
+        }
+
+        return this.prisma.user.findMany({
+            where,
+            select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                name: true,
+                phone: true,
+                role: true,
+                isActive: true,
+                identityStatus: true,
+                image: true,
+                createdAt: true,
+                lastLogin: true,
+                caregiver: {
+                    select: {
+                        id: true,
+                        verificationStatus: true,
+                        specialties: true,
+                        experience: true,
+                        hourlyRate: true,
+                        isAvailable: true,
+                    },
+                },
+                family: {
+                    select: {
+                        id: true,
+                        address: true,
+                    },
+                },
+            },
+            orderBy: { createdAt: 'desc' },
+        });
+    }
+
+    async getUserDetail(userId: string) {
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                name: true,
+                phone: true,
+                role: true,
+                isActive: true,
+                identityStatus: true,
+                image: true,
+                createdAt: true,
+                updatedAt: true,
+                lastLogin: true,
+                diditVerifiedAt: true,
+                fcmTokens: true,
+                caregiver: true,
+                family: true,
+            },
+        });
+
+        if (!user) return null;
+
+        // Build registration steps checklist
+        const steps = {
+            registered: true,
+            roleSelected: user.role !== 'pending',
+            onboardingCompleted: false,
+            identityVerified: user.identityStatus === 'verified',
+            caregiverVerified: false,
+        };
+
+        if (user.role === 'caregiver' && user.caregiver) {
+            steps.onboardingCompleted = !!(user.caregiver as any).bio || !!(user.caregiver as any).experience;
+            steps.caregiverVerified = (user.caregiver as any).verificationStatus === 'verified';
+        } else if (user.role === 'family' && user.family) {
+            steps.onboardingCompleted = !!(user.family as any).address;
+        }
+
+        return { ...user, registrationSteps: steps };
+    }
+
+    async toggleUserActive(userId: string) {
+        const user = await this.prisma.user.findUnique({ where: { id: userId } });
+        if (!user) return null;
+
+        const updated = await this.prisma.user.update({
+            where: { id: userId },
+            data: { isActive: !user.isActive },
+        });
+
+        // Log to Telegram
+        this.telegramService.sendLog(updated.isActive ? 'user.activated' : 'user.deactivated', {
+            name: updated.name || updated.firstName || updated.email,
+            email: updated.email,
+            role: updated.role,
+        }).catch(() => { /* non-blocking */ });
+
+        return { id: updated.id, isActive: updated.isActive };
+    }
+
+    async updateUserRole(userId: string, role: string) {
+        const updated = await this.prisma.user.update({
+            where: { id: userId },
+            data: { role },
+        });
+
+        // Ensure profile record exists
+        if (role === 'family') {
+            const existing = await this.prisma.family.findUnique({ where: { userId } });
+            if (!existing) await this.prisma.family.create({ data: { userId } });
+        } else if (role === 'caregiver') {
+            const existing = await this.prisma.caregiver.findUnique({ where: { userId } });
+            if (!existing) await this.prisma.caregiver.create({ data: { userId } });
+        }
+
+        return { id: updated.id, role: updated.role };
     }
 
     async getActiveServices() {

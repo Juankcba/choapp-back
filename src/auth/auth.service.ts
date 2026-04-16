@@ -13,6 +13,7 @@ import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { MatchingGateway } from '../matching/matching.gateway';
+import { TelegramService } from '../telegram/telegram.service';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
 
 @Injectable()
@@ -23,6 +24,7 @@ export class AuthService {
         private configService: ConfigService,
         private mailService: MailService,
         private matchingGateway: MatchingGateway,
+        private telegramService: TelegramService,
     ) { }
 
     async getProfile(userId: string) {
@@ -97,6 +99,14 @@ export class AuthService {
                 user.role,
             ).catch(() => { /* non-blocking */ });
 
+            // Log to Telegram
+            this.telegramService.sendLog('user.registered', {
+                name: user.name || `${dto.firstName} ${dto.lastName}`,
+                email: user.email,
+                phone: dto.phone,
+                role: user.role,
+            }).catch(() => { /* non-blocking */ });
+
             const payload = { email: user.email, sub: user.id, role: user.role };
             return {
                 access_token: this.jwtService.sign(payload),
@@ -162,6 +172,13 @@ export class AuthService {
 
             // Send welcome email for new social login users
             this.mailService.sendWelcomeEmail(data.email, data.name || 'Usuario');
+
+            // Log to Telegram
+            this.telegramService.sendLog('user.social_login_new', {
+                name: data.name || 'Sin nombre',
+                email: data.email,
+                role: 'pending',
+            }).catch(() => { /* non-blocking */ });
         } else {
             // Update existing user: fill missing fields + update lastLogin
             const updateData: any = { lastLogin: new Date() };
@@ -203,6 +220,13 @@ export class AuthService {
                 await this.prisma.caregiver.create({ data: { userId } });
             }
         }
+
+        // Log to Telegram
+        this.telegramService.sendLog('user.role_selected', {
+            name: user.name || user.firstName || user.email,
+            email: user.email,
+            role,
+        }).catch(() => { /* non-blocking */ });
 
         const payload = { email: user.email, sub: user.id, role: user.role };
         return {

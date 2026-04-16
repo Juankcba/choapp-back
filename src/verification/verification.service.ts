@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { MatchingGateway } from '../matching/matching.gateway';
 import { UsersService } from '../users/users.service';
+import { TelegramService } from '../telegram/telegram.service';
 import { firstValueFrom } from 'rxjs';
 
 @Injectable()
@@ -20,6 +21,7 @@ export class VerificationService {
         private configService: ConfigService,
         private matchingGateway: MatchingGateway,
         private usersService: UsersService,
+        private telegramService: TelegramService,
     ) {
         this.apiKey = this.configService.get<string>('DIDIT_API_KEY') || '';
         this.webhookSecret = this.configService.get<string>('DIDIT_WEBHOOK_SECRET') || '';
@@ -173,6 +175,16 @@ export class VerificationService {
         });
 
         this.logger.log(`User ${user.id} identity status updated to: ${identityStatus}`);
+
+        // Log to Telegram
+        const telegramEvent = identityStatus === 'verified' ? 'user.identity_verified'
+            : identityStatus === 'rejected' ? 'user.identity_rejected'
+            : 'user.identity_pending';
+        this.telegramService.sendLog(telegramEvent, {
+            name: user.name || user.firstName || user.email,
+            email: user.email,
+            identityStatus,
+        }).catch(() => { /* non-blocking */ });
 
         // Notify user via WebSocket
         const isApproved = identityStatus === 'verified';

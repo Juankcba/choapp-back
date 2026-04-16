@@ -2,6 +2,7 @@ import {
     Controller,
     Get,
     Post,
+    Patch,
     Param,
     Body,
     UseGuards,
@@ -22,6 +23,38 @@ export class AdminController {
         private readonly mailService: MailService,
         private readonly paymentsService: PaymentsService,
     ) { }
+
+    // ─── User Management ─────────────────────────
+
+    @Get('users')
+    async getUsers(
+        @Query('role') role?: string,
+        @Query('isActive') isActive?: string,
+        @Query('identityStatus') identityStatus?: string,
+        @Query('search') search?: string,
+    ) {
+        return this.adminService.getUsers({ role, isActive, identityStatus, search });
+    }
+
+    @Get('users/:id')
+    async getUserDetail(@Param('id') id: string) {
+        return this.adminService.getUserDetail(id);
+    }
+
+    @Patch('users/:id/toggle-active')
+    async toggleUserActive(@Param('id') id: string) {
+        return this.adminService.toggleUserActive(id);
+    }
+
+    @Patch('users/:id/role')
+    async updateUserRole(
+        @Param('id') id: string,
+        @Body() body: { role: string },
+    ) {
+        return this.adminService.updateUserRole(id, body.role);
+    }
+
+    // ─── Dashboard ─────────────────────────
 
     @Get('stats')
     async getStats() {
