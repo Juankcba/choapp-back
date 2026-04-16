@@ -456,6 +456,42 @@ export class MailService {
     }
   }
 
+  async sendTesterNotificationEmail(email: string, name: string, device: string): Promise<void> {
+    try {
+      const frontendUrl = this.getFrontendUrl();
+      const isAndroid = device === 'android';
+      const storeInstructions = isAndroid
+        ? 'Te enviamos una invitación a Google Play. Aceptala y luego podrás descargar la app desde la Play Store.'
+        : 'Te enviamos una invitación a TestFlight. Descargá TestFlight de la App Store y aceptá la invitación.';
+
+      await this.sendEmail(
+        email,
+        '📱 ¡Ya podés descargar la app de CHO!',
+        `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0f0f23; color: #e2e8f0; padding: 40px; border-radius: 16px;">
+          <div style="text-align: center; margin-bottom: 30px;">
+            <div style="display: inline-block; background: linear-gradient(135deg, #6366f1, #8b5cf6); width: 60px; height: 60px; border-radius: 16px; line-height: 60px; font-size: 30px;">📱</div>
+          </div>
+          <h1 style="text-align: center; color: #fff; font-size: 24px;">¡Hola ${name}!</h1>
+          <p style="color: #94a3b8; text-align: center; font-size: 16px; line-height: 1.6;">
+            Tu solicitud como tester de CHO fue aprobada. Ya podés descargar la app de prueba.
+          </p>
+          <div style="background: #1e1e2e; border-radius: 12px; padding: 24px; margin: 24px 0;">
+            <h3 style="color: #8b5cf6; margin-top: 0;">Instrucciones para ${isAndroid ? 'Android' : 'iOS'}:</h3>
+            <p style="color: #cbd5e1; line-height: 1.6;">${storeInstructions}</p>
+          </div>
+          <p style="color: #64748b; font-size: 13px; text-align: center;">
+            Si tenés algún problema, escribinos a <a href="mailto:soporte@cho.care" style="color: #6366f1;">soporte@cho.care</a>
+          </p>
+        </div>
+        `,
+      );
+      this.logger.log(`Tester notification email sent to ${email}`);
+    } catch (error) {
+      this.logger.error(`Failed to send tester notification email to ${email}`, error);
+    }
+  }
+
   private getFrontendUrl(): string {
     return this.configService.get<string>('FRONTEND_URL') || 'https://cho.bladelink.company';
   }

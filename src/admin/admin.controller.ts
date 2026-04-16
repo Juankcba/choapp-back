@@ -11,6 +11,7 @@ import {
 import { AdminService } from './admin.service';
 import { MailService } from '../mail/mail.service';
 import { PaymentsService } from '../payments/payments.service';
+import { TestersService } from '../testers/testers.service';
 import { Roles } from '../auth/decorators';
 import { RolesGuard } from '../auth/roles.guard';
 
@@ -22,6 +23,7 @@ export class AdminController {
         private readonly adminService: AdminService,
         private readonly mailService: MailService,
         private readonly paymentsService: PaymentsService,
+        private readonly testersService: TestersService,
     ) { }
 
     // ─── User Management ─────────────────────────
@@ -52,6 +54,30 @@ export class AdminController {
         @Body() body: { role: string },
     ) {
         return this.adminService.updateUserRole(id, body.role);
+    }
+
+    // ─── Testers ─────────────────────────
+
+    @Get('testers')
+    async getTesters(
+        @Query('status') status?: string,
+        @Query('device') device?: string,
+        @Query('search') search?: string,
+    ) {
+        return this.testersService.getAll({ status, device, search });
+    }
+
+    @Get('testers/stats')
+    async getTesterStats() {
+        return this.testersService.getStats();
+    }
+
+    @Patch('testers/:id/status')
+    async updateTesterStatus(
+        @Param('id') id: string,
+        @Body() body: { status: string; notes?: string },
+    ) {
+        return this.testersService.updateStatus(id, body.status, body.notes);
     }
 
     // ─── Dashboard ─────────────────────────

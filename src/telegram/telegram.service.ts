@@ -60,6 +60,8 @@ export class TelegramService {
             'user.deactivated': { emoji: '🔴', title: 'Usuario Desactivado' },
             'caregiver.verified': { emoji: '✅', title: 'Cuidador Aprobado' },
             'caregiver.rejected': { emoji: '❌', title: 'Cuidador Rechazado' },
+            'tester.registered': { emoji: '📱', title: 'Nuevo Tester Registrado' },
+            'tester.status_changed': { emoji: '🔄', title: 'Tester Estado Actualizado' },
         };
 
         const config = eventConfig[event] || { emoji: '📋', title: event };

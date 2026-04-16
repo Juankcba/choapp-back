@@ -19,6 +19,7 @@ import { CareersModule } from './careers/careers.module';
 import { PressModule } from './press/press.module';
 import { VerificationModule } from './verification/verification.module';
 import { TelegramModule } from './telegram/telegram.module';
+import { TestersModule } from './testers/testers.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { TelegramModule } from './telegram/telegram.module';
     CareersModule,
     PressModule,
     VerificationModule,
+    TestersModule,
   ],
 })
 export class AppModule { }

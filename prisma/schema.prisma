@@ -292,3 +292,20 @@ model OtpCode {
   used      Boolean  @default(false)
   createdAt DateTime @default(now())
 }
+
+// ─── Beta Testers ───────────────────────────────────────
+
+model BetaTester {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  email       String   @unique
+  name        String
+  phone       String?
+  device      String   // "android" | "ios"
+  googleEmail String?
+  status      String   @default("pending") // pending | approved | notified | active
+  source      String   // "landing" | "family_dashboard" | "caregiver_dashboard"
+  userId      String?  @db.ObjectId
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
