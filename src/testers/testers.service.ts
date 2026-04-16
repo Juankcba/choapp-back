@@ -11,6 +11,12 @@ export class TestersService {
         private mailService: MailService,
     ) { }
 
+    async checkByEmail(email: string) {
+        if (!email) return { registered: false };
+        const tester = await this.prisma.betaTester.findUnique({ where: { email } });
+        return { registered: !!tester };
+    }
+
     async register(data: {
         email: string;
         name: string;
@@ -59,7 +65,7 @@ export class TestersService {
         });
     }
 
-    async updateStatus(id: string, status: string, notes?: string) {
+    async updateStatus(id: string, status: string, notes?: string, downloadLink?: string) {
         const tester = await this.prisma.betaTester.findUnique({ where: { id } });
         if (!tester) throw new NotFoundException('Tester no encontrado');
 
@@ -74,6 +80,7 @@ export class TestersService {
                 tester.email,
                 tester.name,
                 tester.device,
+                downloadLink,
             ).catch(() => { /* non-blocking */ });
         }
 

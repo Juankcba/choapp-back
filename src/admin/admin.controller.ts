@@ -75,9 +75,9 @@ export class AdminController {
     @Patch('testers/:id/status')
     async updateTesterStatus(
         @Param('id') id: string,
-        @Body() body: { status: string; notes?: string },
+        @Body() body: { status: string; notes?: string; downloadLink?: string },
     ) {
-        return this.testersService.updateStatus(id, body.status, body.notes);
+        return this.testersService.updateStatus(id, body.status, body.notes, body.downloadLink);
     }
 
     // ─── Dashboard ─────────────────────────

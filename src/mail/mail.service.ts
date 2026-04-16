@@ -456,13 +456,18 @@ export class MailService {
     }
   }
 
-  async sendTesterNotificationEmail(email: string, name: string, device: string): Promise<void> {
+  async sendTesterNotificationEmail(email: string, name: string, device: string, downloadLink?: string): Promise<void> {
     try {
       const frontendUrl = this.getFrontendUrl();
       const isAndroid = device === 'android';
       const storeInstructions = isAndroid
         ? 'Te enviamos una invitación a Google Play. Aceptala y luego podrás descargar la app desde la Play Store.'
         : 'Te enviamos una invitación a TestFlight. Descargá TestFlight de la App Store y aceptá la invitación.';
+      const downloadSection = downloadLink
+        ? `<div style="text-align: center; margin: 24px 0;">
+            <a href="${downloadLink}" style="display: inline-block; background: linear-gradient(135deg, #1a8a7d, #4da6d6); color: #fff; text-decoration: none; padding: 14px 32px; border-radius: 12px; font-weight: bold; font-size: 16px;">Descargar la App</a>
+           </div>`
+        : '';
 
       await this.sendEmail(
         email,
@@ -480,8 +485,9 @@ export class MailService {
             <h3 style="color: #8b5cf6; margin-top: 0;">Instrucciones para ${isAndroid ? 'Android' : 'iOS'}:</h3>
             <p style="color: #cbd5e1; line-height: 1.6;">${storeInstructions}</p>
           </div>
+          ${downloadSection}
           <p style="color: #64748b; font-size: 13px; text-align: center;">
-            Si tenés algún problema, escribinos a <a href="mailto:soporte@cho.care" style="color: #6366f1;">soporte@cho.care</a>
+            Si tenés algún problema, escribinos a <a href="mailto:cho.live.app+soporte@gmail.com" style="color: #6366f1;">cho.live.app+soporte@gmail.com</a>
           </p>
         </div>
         `,

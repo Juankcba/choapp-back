@@ -1,10 +1,16 @@
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, Post, Get, Body, Query } from '@nestjs/common';
 import { TestersService } from './testers.service';
 import { Public } from '../auth/decorators';
 
 @Controller('testers')
 export class TestersController {
     constructor(private readonly testersService: TestersService) { }
+
+    @Public()
+    @Get('check')
+    async check(@Query('email') email: string) {
+        return this.testersService.checkByEmail(email);
+    }
 
     @Public()
     @Post('register')
