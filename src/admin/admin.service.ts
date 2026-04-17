@@ -361,6 +361,126 @@ export class AdminService {
     }
 
     /**
+     * Validate coordinates: must be valid numbers within Earth bounds.
+     * Also filters obvious noise: (0,0), default Buenos Aires center, swapped lat/lng.
+     */
+    private isValidCoord(lat: number | null | undefined, lng: number | null | undefined): boolean {
+        if (lat == null || lng == null) return false;
+        if (typeof lat !== 'number' || typeof lng !== 'number') return false;
+        if (isNaN(lat) || isNaN(lng)) return false;
+        if (!isFinite(lat) || !isFinite(lng)) return false;
+
+        // Earth bounds
+        if (lat < -90 || lat > 90) return false;
+        if (lng < -180 || lng > 180) return false;
+
+        // Reject (0, 0) — null island, default value
+        if (lat === 0 && lng === 0) return false;
+
+        return true;
+    }
+
+    /**
+     * Diagnostic: list users with invalid or suspicious coordinates
+     */
+    async getUsersWithBadCoordinates() {
+        const [caregivers, families] = await Promise.all([
+            this.prisma.caregiver.findMany({
+                where: {
+                    OR: [
+                        { locationLat: { not: null } },
+                        { locationLng: { not: null } },
+                    ],
+                },
+                select: {
+                    id: true,
+                    userId: true,
+                    locationLat: true,
+                    locationLng: true,
+                    user: { select: { firstName: true, lastName: true, name: true, email: true } },
+                },
+            }),
+            this.prisma.family.findMany({
+                where: {
+                    OR: [
+                        { locationLat: { not: null } },
+                        { locationLng: { not: null } },
+                    ],
+                },
+                select: {
+                    id: true,
+                    userId: true,
+                    locationLat: true,
+                    locationLng: true,
+                    address: true,
+                    user: { select: { firstName: true, lastName: true, name: true, email: true } },
+                },
+            }),
+        ]);
+
+        const issues: any[] = [];
+
+        const checkAndPush = (entity: any, type: 'caregiver' | 'family') => {
+            const lat = entity.locationLat;
+            const lng = entity.locationLng;
+            const reasons: string[] = [];
+
+            if (lat == null || lng == null) reasons.push('Falta lat o lng');
+            else {
+                if (typeof lat !== 'number' || typeof lng !== 'number') reasons.push('No es numero');
+                if (isNaN(lat) || isNaN(lng)) reasons.push('NaN');
+                if (lat < -90 || lat > 90) reasons.push(`lat fuera de rango (${lat})`);
+                if (lng < -180 || lng > 180) reasons.push(`lng fuera de rango (${lng})`);
+                if (lat === 0 && lng === 0) reasons.push('Coordenada (0,0) - null island');
+                // Argentina sanity check: lat -55 to -21, lng -74 to -53
+                if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+                    if (lat > 0 && lng < 0) reasons.push('Posible lat/lng cruzados (esta en N+W, deberia ser S+W para AR)');
+                    if (lat < -55 || lat > -21 || lng < -74 || lng > -53) {
+                        reasons.push('Fuera de Argentina (puede ser correcto si es otro pais)');
+                    }
+                }
+            }
+
+            if (reasons.length > 0) {
+                issues.push({
+                    type,
+                    id: entity.id,
+                    userId: entity.userId,
+                    name: entity.user?.name || `${entity.user?.firstName || ''} ${entity.user?.lastName || ''}`.trim() || entity.user?.email,
+                    email: entity.user?.email,
+                    locationLat: lat,
+                    locationLng: lng,
+                    address: entity.address,
+                    reasons,
+                });
+            }
+        };
+
+        caregivers.forEach(c => checkAndPush(c, 'caregiver'));
+        families.forEach(f => checkAndPush(f, 'family'));
+
+        return {
+            total: issues.length,
+            critical: issues.filter(i => i.reasons.some((r: string) => !r.startsWith('Fuera de Argentina'))).length,
+            issues,
+        };
+    }
+
+    async clearCaregiverLocation(caregiverId: string) {
+        return this.prisma.caregiver.update({
+            where: { id: caregiverId },
+            data: { locationLat: null, locationLng: null },
+        });
+    }
+
+    async clearFamilyLocation(familyId: string) {
+        return this.prisma.family.update({
+            where: { id: familyId },
+            data: { locationLat: null, locationLng: null },
+        });
+    }
+
+    /**
      * Map data: services + caregivers + families with locations
      */
     async getMapData() {
@@ -432,16 +552,36 @@ export class AdminService {
             }),
         ]);
 
-        return {
-            services: services.map(s => ({
+        // Track skipped entries for diagnostics
+        let skippedServices = 0;
+        let skippedCaregivers = 0;
+        let skippedFamilies = 0;
+
+        const validServices = services
+            .filter(s => {
+                const ok = this.isValidCoord(s.serviceLocationLat as any, s.serviceLocationLng as any);
+                if (!ok) skippedServices++;
+                return ok;
+            })
+            .map(s => ({
                 ...s,
                 lat: s.serviceLocationLat,
                 lng: s.serviceLocationLng,
                 familyUserId: s.family?.user?.id,
                 familyName: s.family?.user?.name || `${s.family?.user?.firstName || ''} ${s.family?.user?.lastName || ''}`.trim() || 'Familia',
                 caregiverName: s.caregiver?.user?.name || `${s.caregiver?.user?.firstName || ''} ${s.caregiver?.user?.lastName || ''}`.trim() || null,
-            })),
-            caregivers: caregivers.map(c => ({
+            }));
+
+        const validCaregivers = caregivers
+            .filter(c => {
+                const ok = this.isValidCoord(c.locationLat as any, c.locationLng as any);
+                if (!ok) {
+                    skippedCaregivers++;
+                    this.logger.warn(`Skipping caregiver ${c.id} (user ${c.userId}) - bad coords: lat=${c.locationLat}, lng=${c.locationLng}`);
+                }
+                return ok;
+            })
+            .map(c => ({
                 id: c.id,
                 userId: c.userId,
                 lat: c.locationLat,
@@ -455,8 +595,18 @@ export class AdminService {
                 isAvailable: c.isAvailable,
                 verificationStatus: c.verificationStatus,
                 hasPushToken: (c.user?.fcmTokens || []).length > 0,
-            })),
-            families: families.map(f => ({
+            }));
+
+        const validFamilies = families
+            .filter(f => {
+                const ok = this.isValidCoord(f.locationLat as any, f.locationLng as any);
+                if (!ok) {
+                    skippedFamilies++;
+                    this.logger.warn(`Skipping family ${f.id} (user ${f.userId}) - bad coords: lat=${f.locationLat}, lng=${f.locationLng}`);
+                }
+                return ok;
+            })
+            .map(f => ({
                 id: f.id,
                 userId: f.userId,
                 lat: f.locationLat,
@@ -466,7 +616,21 @@ export class AdminService {
                 phone: f.user?.phone,
                 address: f.address,
                 hasPushToken: (f.user?.fcmTokens || []).length > 0,
-            })),
+            }));
+
+        if (skippedServices + skippedCaregivers + skippedFamilies > 0) {
+            this.logger.warn(`getMapData: skipped ${skippedServices} services, ${skippedCaregivers} caregivers, ${skippedFamilies} families with invalid coords`);
+        }
+
+        return {
+            services: validServices,
+            caregivers: validCaregivers,
+            families: validFamilies,
+            _diagnostics: {
+                skippedServices,
+                skippedCaregivers,
+                skippedFamilies,
+            },
         };
     }
 

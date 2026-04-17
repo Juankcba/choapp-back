@@ -59,6 +59,23 @@ export class AdminController {
         return this.adminService.updateUserRole(id, body.role);
     }
 
+    // ─── Map Diagnostics ─────────────────────────
+
+    @Get('map/bad-coords')
+    async getBadCoords() {
+        return this.adminService.getUsersWithBadCoordinates();
+    }
+
+    @Patch('caregivers/:id/clear-location')
+    async clearCaregiverLocation(@Param('id') id: string) {
+        return this.adminService.clearCaregiverLocation(id);
+    }
+
+    @Patch('families/:id/clear-location')
+    async clearFamilyLocation(@Param('id') id: string) {
+        return this.adminService.clearFamilyLocation(id);
+    }
+
     // ─── DNI / Identity ─────────────────────────
 
     @Get('users/:id/identity')
