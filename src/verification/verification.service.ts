@@ -91,11 +91,12 @@ export class VerificationService {
 
             const { url, session_token, session_id } = response.data;
 
-            // Update user with session info
+            // Always store the session_id (UUID) — required to query the decision endpoint.
+            // session_token is only valid for the frontend iframe.
             await this.prisma.user.update({
                 where: { id: userId },
                 data: {
-                    diditSessionId: session_token || session_id,
+                    diditSessionId: session_id || session_token,
                     identityStatus: 'pending',
                 },
             });

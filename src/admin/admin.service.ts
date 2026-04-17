@@ -508,19 +508,60 @@ export class AdminService {
         }
 
         try {
-            const url = `https://verification.didit.me/v3/session/${user.diditSessionId}/decision/`;
+            // Helper: detect UUID format (session_id is a UUID)
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            const looksLikeUuid = uuidRegex.test(user.diditSessionId);
+
+            let sessionIdToQuery = user.diditSessionId;
+
+            // If we don't have a UUID stored (old data with session_token), try to find the session
+            // by querying the sessions list filtered by vendor_data (= userId)
+            if (!looksLikeUuid) {
+                this.logger.log(`Stored sessionId is not UUID, searching by vendor_data for user ${userId}`);
+                try {
+                    const searchUrl = `https://verification.didit.me/v3/sessions/?vendor_data=${userId}`;
+                    const searchRes = await fetch(searchUrl, {
+                        headers: { 'x-api-key': apiKey, 'Accept': 'application/json' },
+                    });
+                    if (searchRes.ok) {
+                        const searchData = await searchRes.json();
+                        const sessions = searchData?.results || searchData?.sessions || searchData;
+                        const verified = Array.isArray(sessions)
+                            ? sessions.find((s: any) => s.status === 'Approved' || s.status === 'In Review')
+                            : null;
+                        if (verified?.session_id || verified?.id) {
+                            sessionIdToQuery = verified.session_id || verified.id;
+                            // Persist for future calls
+                            await this.prisma.user.update({
+                                where: { id: userId },
+                                data: { diditSessionId: sessionIdToQuery },
+                            });
+                        }
+                    }
+                } catch (e) {
+                    this.logger.warn(`Search by vendor_data failed: ${(e as any).message}`);
+                }
+            }
+
+            const url = `https://verification.didit.me/v3/session/${sessionIdToQuery}/decision/`;
             const res = await fetch(url, {
                 headers: { 'x-api-key': apiKey, 'Accept': 'application/json' },
             });
 
             if (!res.ok) {
-                this.logger.warn(`Didit decision fetch failed for user ${userId}: ${res.status}`);
-                return { ...user, hasDocuments: false, error: `Didit API error: ${res.status}` };
+                this.logger.warn(`Didit decision fetch failed for user ${userId}: ${res.status} (sessionId: ${sessionIdToQuery})`);
+                const errorMsg = res.status === 404
+                    ? 'Sesion no encontrada en Didit. El usuario puede tener un sessionId obsoleto.'
+                    : `Didit API error: ${res.status}`;
+                return { ...user, hasDocuments: false, error: errorMsg };
             }
 
             const data = await res.json();
 
-            // Extract images and document data
+            // Per Didit v3 docs, top-level response fields:
+            // - id_verification: { front_image, back_image, portrait_image, full_front_image, full_back_image, ...ocr fields }
+            // - liveness: { image, video_url, ... }
+            // - face_match: { source_image, target_image, ... }
             const idVerification = data.id_verification || data.kyc || data;
             const liveness = data.liveness || {};
             const faceMatch = data.face_match || {};
@@ -529,9 +570,10 @@ export class AdminService {
                 ...user,
                 hasDocuments: true,
                 documents: {
-                    frontImage: idVerification.full_front_image || idVerification.front_image_camera_front || null,
-                    backImage: idVerification.full_back_image || idVerification.back_image_camera_front || null,
-                    selfieImage: liveness.image || liveness.full_image || faceMatch.source_image || null,
+                    frontImage: idVerification.full_front_image || idVerification.front_image || null,
+                    backImage: idVerification.full_back_image || idVerification.back_image || null,
+                    selfieImage: liveness.image || liveness.reference_image || faceMatch.source_image || null,
+                    selfieVideoUrl: liveness.video_url || null,
                     portraitImage: idVerification.portrait_image || null,
                     documentNumber: idVerification.document_number || user.dni,
                     documentType: idVerification.document_type || null,
