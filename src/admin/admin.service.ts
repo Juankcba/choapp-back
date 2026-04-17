@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { MatchingGateway } from '../matching/matching.gateway';
 import { MailService } from '../mail/mail.service';
@@ -15,6 +16,7 @@ export class AdminService {
         private mailService: MailService,
         private usersService: UsersService,
         private telegramService: TelegramService,
+        private configService: ConfigService,
     ) { }
 
     async getStats() {
@@ -95,7 +97,7 @@ export class AdminService {
             ];
         }
 
-        return this.prisma.user.findMany({
+        const users = await this.prisma.user.findMany({
             where,
             select: {
                 id: true,
@@ -129,6 +131,32 @@ export class AdminService {
             },
             orderBy: { createdAt: 'desc' },
         });
+
+        // Attach criminal record status for each user
+        const userIds = users.map(u => u.id);
+        const records = await this.prisma.criminalRecord.findMany({
+            where: { userId: { in: userIds } },
+            orderBy: { createdAt: 'desc' },
+        });
+
+        const now = new Date();
+        const recordsByUser = new Map<string, any>();
+        for (const r of records) {
+            if (!recordsByUser.has(r.userId)) {
+                const expires = new Date(r.expiresAt);
+                const days = Math.floor((expires.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+                let status: 'vigente' | 'por_vencer' | 'vencido';
+                if (days < 0) status = 'vencido';
+                else if (days <= 30) status = 'por_vencer';
+                else status = 'vigente';
+                recordsByUser.set(r.userId, { status, expiresAt: r.expiresAt, daysUntilExpiry: days });
+            }
+        }
+
+        return users.map(u => ({
+            ...u,
+            criminalRecord: recordsByUser.get(u.id) || null,
+        }));
     }
 
     async getUserDetail(userId: string) {
@@ -173,7 +201,16 @@ export class AdminService {
             steps.onboardingCompleted = !!(user.family as any).address;
         }
 
-        return { ...user, registrationSteps: steps };
+        // Attach criminal records
+        const criminalRecords = await this.getCriminalRecords(userId);
+        const currentCriminal = await this.getCurrentCriminalRecord(userId);
+
+        return {
+            ...user,
+            registrationSteps: steps,
+            criminalRecords,
+            currentCriminalRecord: currentCriminal,
+        };
     }
 
     async toggleUserActive(userId: string) {
@@ -324,10 +361,10 @@ export class AdminService {
     }
 
     /**
-     * Map data: services + caregivers with locations
+     * Map data: services + caregivers + families with locations
      */
     async getMapData() {
-        const [services, caregivers] = await Promise.all([
+        const [services, caregivers, families] = await Promise.all([
             this.prisma.service.findMany({
                 where: {
                     serviceLocationLat: { not: null },
@@ -359,11 +396,11 @@ export class AdminService {
                 orderBy: { createdAt: 'desc' },
                 take: 200,
             }),
+            // Show ALL caregivers with location (verified or not)
             this.prisma.caregiver.findMany({
                 where: {
                     locationLat: { not: null },
                     locationLng: { not: null },
-                    verificationStatus: 'verified',
                 },
                 select: {
                     id: true,
@@ -374,7 +411,23 @@ export class AdminService {
                     hourlyRate: true,
                     experience: true,
                     isAvailable: true,
-                    user: { select: { id: true, firstName: true, lastName: true, name: true, email: true, fcmTokens: true } },
+                    verificationStatus: true,
+                    user: { select: { id: true, firstName: true, lastName: true, name: true, email: true, phone: true, fcmTokens: true } },
+                },
+            }),
+            // Families with location
+            this.prisma.family.findMany({
+                where: {
+                    locationLat: { not: null },
+                    locationLng: { not: null },
+                },
+                select: {
+                    id: true,
+                    userId: true,
+                    locationLat: true,
+                    locationLng: true,
+                    address: true,
+                    user: { select: { id: true, firstName: true, lastName: true, name: true, email: true, phone: true, fcmTokens: true } },
                 },
             }),
         ]);
@@ -395,13 +448,180 @@ export class AdminService {
                 lng: c.locationLng,
                 name: c.user?.name || `${c.user?.firstName || ''} ${c.user?.lastName || ''}`.trim() || 'Cuidador',
                 email: c.user?.email,
+                phone: c.user?.phone,
                 specialties: c.specialties || [],
                 hourlyRate: c.hourlyRate,
                 experience: c.experience,
                 isAvailable: c.isAvailable,
+                verificationStatus: c.verificationStatus,
                 hasPushToken: (c.user?.fcmTokens || []).length > 0,
             })),
+            families: families.map(f => ({
+                id: f.id,
+                userId: f.userId,
+                lat: f.locationLat,
+                lng: f.locationLng,
+                name: f.user?.name || `${f.user?.firstName || ''} ${f.user?.lastName || ''}`.trim() || 'Familia',
+                email: f.user?.email,
+                phone: f.user?.phone,
+                address: f.address,
+                hasPushToken: (f.user?.fcmTokens || []).length > 0,
+            })),
         };
+    }
+
+    // ─── DNI / Identity (Didit API) ─────────────────────
+
+    async getUserIdentityDocuments(userId: string) {
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                name: true,
+                dni: true,
+                identityStatus: true,
+                diditSessionId: true,
+                diditVerifiedAt: true,
+            },
+        });
+
+        if (!user) {
+            throw new NotFoundException('Usuario no encontrado');
+        }
+
+        // If no Didit session, return only basic data
+        if (!user.diditSessionId) {
+            return {
+                ...user,
+                hasDocuments: false,
+                error: 'Usuario no inicio verificacion via Didit',
+            };
+        }
+
+        // Fetch session decision from Didit
+        const apiKey = this.configService.get<string>('DIDIT_API_KEY') || '';
+        if (!apiKey) {
+            return { ...user, hasDocuments: false, error: 'DIDIT_API_KEY no configurada' };
+        }
+
+        try {
+            const url = `https://verification.didit.me/v3/session/${user.diditSessionId}/decision/`;
+            const res = await fetch(url, {
+                headers: { 'x-api-key': apiKey, 'Accept': 'application/json' },
+            });
+
+            if (!res.ok) {
+                this.logger.warn(`Didit decision fetch failed for user ${userId}: ${res.status}`);
+                return { ...user, hasDocuments: false, error: `Didit API error: ${res.status}` };
+            }
+
+            const data = await res.json();
+
+            // Extract images and document data
+            const idVerification = data.id_verification || data.kyc || data;
+            const liveness = data.liveness || {};
+            const faceMatch = data.face_match || {};
+
+            return {
+                ...user,
+                hasDocuments: true,
+                documents: {
+                    frontImage: idVerification.full_front_image || idVerification.front_image_camera_front || null,
+                    backImage: idVerification.full_back_image || idVerification.back_image_camera_front || null,
+                    selfieImage: liveness.image || liveness.full_image || faceMatch.source_image || null,
+                    portraitImage: idVerification.portrait_image || null,
+                    documentNumber: idVerification.document_number || user.dni,
+                    documentType: idVerification.document_type || null,
+                    fullName: idVerification.full_name || `${idVerification.first_name || ''} ${idVerification.last_name || ''}`.trim() || null,
+                    firstName: idVerification.first_name || null,
+                    lastName: idVerification.last_name || null,
+                    dateOfBirth: idVerification.date_of_birth || null,
+                    age: idVerification.age || null,
+                    gender: idVerification.gender || null,
+                    nationality: idVerification.nationality || null,
+                    expirationDate: idVerification.expiration_date || null,
+                    issuingState: idVerification.issuing_state || idVerification.issuing_country || null,
+                    address: idVerification.address || null,
+                },
+            };
+        } catch (error: any) {
+            this.logger.error(`Error fetching Didit docs for ${userId}`, error?.message || error);
+            return { ...user, hasDocuments: false, error: 'Error al consultar Didit' };
+        }
+    }
+
+    // ─── Criminal Records ─────────────────────────────
+
+    async addCriminalRecord(userId: string, data: {
+        fileUrl: string;
+        fileName: string;
+        fileType: string;
+        issueDate: string;
+        expiresAt: string;
+        notes?: string;
+        uploadedBy: string;
+    }) {
+        const user = await this.prisma.user.findUnique({ where: { id: userId } });
+        if (!user) throw new NotFoundException('Usuario no encontrado');
+
+        const record = await this.prisma.criminalRecord.create({
+            data: {
+                userId,
+                fileUrl: data.fileUrl,
+                fileName: data.fileName,
+                fileType: data.fileType,
+                issueDate: new Date(data.issueDate),
+                expiresAt: new Date(data.expiresAt),
+                notes: data.notes,
+                uploadedBy: data.uploadedBy,
+            },
+        });
+
+        // Log to Telegram
+        this.telegramService.sendLog('criminal_record.uploaded', {
+            name: user.name || user.firstName || user.email,
+            email: user.email,
+            expiresAt: new Date(data.expiresAt).toLocaleDateString('es-AR'),
+        } as any).catch(() => { /* non-blocking */ });
+
+        return record;
+    }
+
+    async getCriminalRecords(userId: string) {
+        return this.prisma.criminalRecord.findMany({
+            where: { userId },
+            orderBy: { createdAt: 'desc' },
+        });
+    }
+
+    async deleteCriminalRecord(recordId: string) {
+        return this.prisma.criminalRecord.delete({ where: { id: recordId } });
+    }
+
+    /**
+     * Get the most recent valid criminal record for a user
+     * Returns: { record, status: 'vigente' | 'por_vencer' | 'vencido' | null }
+     */
+    async getCurrentCriminalRecord(userId: string) {
+        const record = await this.prisma.criminalRecord.findFirst({
+            where: { userId },
+            orderBy: { createdAt: 'desc' },
+        });
+        if (!record) return { record: null, status: null };
+
+        const now = new Date();
+        const expires = new Date(record.expiresAt);
+        const daysUntilExpiry = Math.floor((expires.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+        let status: 'vigente' | 'por_vencer' | 'vencido';
+        if (daysUntilExpiry < 0) status = 'vencido';
+        else if (daysUntilExpiry <= 30) status = 'por_vencer';
+        else status = 'vigente';
+
+        return { record, status, daysUntilExpiry };
     }
 
     /**

@@ -3,11 +3,14 @@ import {
     Get,
     Post,
     Patch,
+    Delete,
     Param,
     Body,
     UseGuards,
     Query,
+    Req,
 } from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminService } from './admin.service';
 import { MailService } from '../mail/mail.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -54,6 +57,42 @@ export class AdminController {
         @Body() body: { role: string },
     ) {
         return this.adminService.updateUserRole(id, body.role);
+    }
+
+    // ─── DNI / Identity ─────────────────────────
+
+    @Get('users/:id/identity')
+    async getUserIdentity(@Param('id') id: string) {
+        return this.adminService.getUserIdentityDocuments(id);
+    }
+
+    // ─── Criminal Records ─────────────────────────
+
+    @Get('users/:id/criminal-records')
+    async getCriminalRecords(@Param('id') id: string) {
+        return this.adminService.getCriminalRecords(id);
+    }
+
+    @Post('users/:id/criminal-records')
+    async addCriminalRecord(
+        @Param('id') id: string,
+        @Body() body: {
+            fileUrl: string;
+            fileName: string;
+            fileType: string;
+            issueDate: string;
+            expiresAt: string;
+            notes?: string;
+        },
+        @Req() req: any,
+    ) {
+        const adminUserId = req.user?.userId || req.user?.sub || req.user?.id || 'unknown';
+        return this.adminService.addCriminalRecord(id, { ...body, uploadedBy: adminUserId });
+    }
+
+    @Delete('criminal-records/:recordId')
+    async deleteCriminalRecord(@Param('recordId') recordId: string) {
+        return this.adminService.deleteCriminalRecord(recordId);
     }
 
     // ─── Testers ─────────────────────────

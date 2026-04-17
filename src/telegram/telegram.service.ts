@@ -62,6 +62,9 @@ export class TelegramService {
             'caregiver.rejected': { emoji: '❌', title: 'Cuidador Rechazado' },
             'tester.registered': { emoji: '📱', title: 'Nuevo Tester Registrado' },
             'tester.status_changed': { emoji: '🔄', title: 'Tester Estado Actualizado' },
+            'criminal_record.uploaded': { emoji: '📄', title: 'Antecedente Penal Subido' },
+            'criminal_record.expiring': { emoji: '⚠️', title: 'Antecedente Por Vencer' },
+            'criminal_record.expired': { emoji: '🚨', title: 'Antecedente VENCIDO' },
         };
 
         const config = eventConfig[event] || { emoji: '📋', title: event };
@@ -90,5 +93,9 @@ export class TelegramService {
         identityStatus: '🪪 Identidad',
         reason: '📝 Razón',
         adminNote: '📝 Nota admin',
+        expiresAt: '📅 Vence',
+        device: '📱 Dispositivo',
+        source: '🔗 Fuente',
+        googleEmail: '📧 Email Google',
     };
 }

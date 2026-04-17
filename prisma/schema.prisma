@@ -309,3 +309,19 @@ model BetaTester {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
+
+// ─── Criminal Record (Antecedentes Penales) ─────────────
+
+model CriminalRecord {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String   @db.ObjectId
+  fileUrl     String
+  fileName    String
+  fileType    String
+  issueDate   DateTime
+  expiresAt   DateTime
+  notes       String?
+  uploadedBy  String   @db.ObjectId
+  notifiedAt  DateTime?
+  createdAt   DateTime @default(now())
+}
