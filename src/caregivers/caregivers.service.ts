@@ -138,6 +138,31 @@ export class CaregiversService {
         });
     }
 
+    async getPublicStats() {
+        const [verifiedCaregivers, reviewAgg] = await Promise.all([
+            this.prisma.caregiver.count({
+                where: {
+                    verificationStatus: 'verified',
+                    user: { identityStatus: 'verified' },
+                },
+            }),
+            this.prisma.review.aggregate({
+                where: { reviewType: 'family_to_caregiver' },
+                _avg: { rating: true },
+                _count: { rating: true },
+            }),
+        ]);
+
+        const avg = reviewAgg._avg.rating ?? 0;
+        const totalReviews = reviewAgg._count.rating ?? 0;
+
+        return {
+            verifiedCaregivers,
+            averageRating: Math.round(avg * 10) / 10,
+            totalReviews,
+        };
+    }
+
     async getPublicList() {
         const caregivers = await this.prisma.caregiver.findMany({
             where: {

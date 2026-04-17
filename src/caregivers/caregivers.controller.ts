@@ -10,7 +10,7 @@ import {
     UseGuards,
 } from '@nestjs/common';
 import { CaregiversService } from './caregivers.service';
-import { Roles } from '../auth/decorators';
+import { Roles, Public } from '../auth/decorators';
 import { RolesGuard } from '../auth/roles.guard';
 
 @Controller('caregivers')
@@ -25,13 +25,21 @@ export class CaregiversController {
     }
 
     @Get(':id/public')
+    @Public()
     async getPublicProfile(@Param('id') id: string) {
         return this.caregiversService.getPublicProfile(id);
     }
 
     @Get('public/list')
+    @Public()
     async getPublicList() {
         return this.caregiversService.getPublicList();
+    }
+
+    @Get('public/stats')
+    @Public()
+    async getPublicStats() {
+        return this.caregiversService.getPublicStats();
     }
 
     @Post('profile')
