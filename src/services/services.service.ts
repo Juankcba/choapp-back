@@ -182,6 +182,7 @@ export class ServicesService {
                 hourlyRate: n.caregiver.hourlyRate,
                 bio: n.caregiver.bio,
                 specialties: n.caregiver.specialties,
+                certifications: (n.caregiver.certifications || []) as any[],
             },
         }));
     }

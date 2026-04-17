@@ -1,5 +1,22 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+
+const CREDENTIAL_KINDS = ['certification', 'course', 'experience'] as const;
+type CredentialKind = typeof CREDENTIAL_KINDS[number];
+
+interface CredentialInput {
+    kind: CredentialKind;
+    title: string;
+    institution?: string;
+    description?: string;
+    issueDate?: string;
+    expiresAt?: string;
+    hours?: number;
+    fileUrl?: string;
+    fileName?: string;
+    fileType?: string;
+}
 
 @Injectable()
 export class CaregiversService {
@@ -89,5 +106,61 @@ export class CaregiversService {
         });
 
         return service;
+    }
+
+    async addCredential(userId: string, input: CredentialInput) {
+        if (!input?.kind || !CREDENTIAL_KINDS.includes(input.kind)) {
+            throw new BadRequestException('Tipo de credencial invalido');
+        }
+        if (!input.title || !input.title.trim()) {
+            throw new BadRequestException('El titulo es obligatorio');
+        }
+
+        const caregiver = await this.prisma.caregiver.findUnique({ where: { userId } });
+        if (!caregiver) throw new NotFoundException('Caregiver not found');
+
+        const credential = {
+            id: randomUUID(),
+            kind: input.kind,
+            title: input.title.trim(),
+            institution: input.institution?.trim() || null,
+            description: input.description?.trim() || null,
+            issueDate: input.issueDate || null,
+            expiresAt: input.expiresAt || null,
+            hours: typeof input.hours === 'number' ? input.hours : null,
+            fileUrl: input.fileUrl || null,
+            fileName: input.fileName || null,
+            fileType: input.fileType || null,
+            createdAt: new Date().toISOString(),
+        };
+
+        const existing = (caregiver.certifications || []) as any[];
+        const updated = [...existing, credential];
+
+        await this.prisma.caregiver.update({
+            where: { userId },
+            data: { certifications: updated },
+        });
+
+        return credential;
+    }
+
+    async deleteCredential(userId: string, credentialId: string) {
+        const caregiver = await this.prisma.caregiver.findUnique({ where: { userId } });
+        if (!caregiver) throw new NotFoundException('Caregiver not found');
+
+        const existing = (caregiver.certifications || []) as any[];
+        const updated = existing.filter((c) => c?.id !== credentialId);
+
+        if (updated.length === existing.length) {
+            throw new NotFoundException('Credential not found');
+        }
+
+        await this.prisma.caregiver.update({
+            where: { userId },
+            data: { certifications: updated },
+        });
+
+        return { success: true };
     }
 }

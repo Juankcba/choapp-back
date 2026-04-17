@@ -1,5 +1,6 @@
 import {
     Controller,
+    Delete,
     Get,
     Patch,
     Post,
@@ -63,5 +64,17 @@ export class CaregiversController {
     @Roles('caregiver')
     async completeJob(@Req() req: any, @Param('id') id: string) {
         return this.caregiversService.completeJob(req.user.userId, id);
+    }
+
+    @Post('credentials')
+    @Roles('caregiver')
+    async addCredential(@Req() req: any, @Body() body: any) {
+        return this.caregiversService.addCredential(req.user.userId, body);
+    }
+
+    @Delete('credentials/:id')
+    @Roles('caregiver')
+    async deleteCredential(@Req() req: any, @Param('id') id: string) {
+        return this.caregiversService.deleteCredential(req.user.userId, id);
     }
 }
