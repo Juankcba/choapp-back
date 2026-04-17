@@ -24,6 +24,11 @@ export class CaregiversController {
         return this.caregiversService.getProfile(req.user.userId);
     }
 
+    @Get(':id/public')
+    async getPublicProfile(@Param('id') id: string) {
+        return this.caregiversService.getPublicProfile(id);
+    }
+
     @Post('profile')
     @Roles('caregiver')
     async createProfile(@Req() req: any, @Body() body: any) {

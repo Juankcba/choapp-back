@@ -31,6 +31,46 @@ export class CaregiversService {
         return caregiver;
     }
 
+    async getPublicProfile(caregiverId: string) {
+        const caregiver = await this.prisma.caregiver.findUnique({
+            where: { id: caregiverId },
+            include: {
+                user: { select: { firstName: true, lastName: true, name: true, image: true } },
+                reviews: {
+                    where: { reviewType: 'family_to_caregiver' },
+                    orderBy: { createdAt: 'desc' },
+                    take: 10,
+                    select: {
+                        id: true,
+                        rating: true,
+                        comment: true,
+                        createdAt: true,
+                        reviewer: { select: { firstName: true, lastName: true, name: true } },
+                    },
+                },
+            },
+        });
+        if (!caregiver) throw new NotFoundException('Caregiver not found');
+
+        return {
+            id: caregiver.id,
+            firstName: caregiver.user.firstName,
+            lastName: caregiver.user.lastName,
+            name: caregiver.user.name,
+            image: caregiver.user.image,
+            bio: caregiver.bio,
+            specialties: caregiver.specialties,
+            experience: caregiver.experience,
+            hourlyRate: caregiver.hourlyRate,
+            rating: caregiver.rating,
+            totalReviews: caregiver.totalReviews,
+            totalServices: caregiver.totalServices,
+            verificationStatus: caregiver.verificationStatus,
+            certifications: caregiver.certifications || [],
+            reviews: caregiver.reviews,
+        };
+    }
+
     async updateProfile(userId: string, data: any) {
         const mappedData: any = {};
 
