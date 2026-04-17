@@ -59,6 +59,21 @@ export class AdminController {
         return this.adminService.updateUserRole(id, body.role);
     }
 
+    @Patch('users/:id')
+    async updateUser(
+        @Param('id') id: string,
+        @Body() body: {
+            firstName?: string;
+            lastName?: string;
+            phone?: string;
+            dni?: string;
+            identityStatus?: string;
+            address?: string;
+        },
+    ) {
+        return this.adminService.updateUser(id, body);
+    }
+
     // ─── Map Diagnostics ─────────────────────────
 
     @Get('map/bad-coords')

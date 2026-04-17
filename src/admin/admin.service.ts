@@ -109,6 +109,7 @@ export class AdminService {
                 role: true,
                 isActive: true,
                 identityStatus: true,
+                dni: true,
                 image: true,
                 createdAt: true,
                 lastLogin: true,
@@ -172,11 +173,13 @@ export class AdminService {
                 role: true,
                 isActive: true,
                 identityStatus: true,
+                dni: true,
                 image: true,
                 createdAt: true,
                 updatedAt: true,
                 lastLogin: true,
                 diditVerifiedAt: true,
+                diditSessionId: true,
                 fcmTokens: true,
                 caregiver: true,
                 family: true,
@@ -230,6 +233,55 @@ export class AdminService {
         }).catch(() => { /* non-blocking */ });
 
         return { id: updated.id, isActive: updated.isActive };
+    }
+
+    async updateUser(userId: string, data: {
+        firstName?: string;
+        lastName?: string;
+        phone?: string;
+        dni?: string;
+        identityStatus?: string;
+        address?: string;
+    }) {
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            include: { family: true, caregiver: true },
+        });
+        if (!user) throw new NotFoundException('Usuario no encontrado');
+
+        // Update User fields
+        const userUpdate: any = {};
+        if (data.firstName !== undefined) userUpdate.firstName = data.firstName;
+        if (data.lastName !== undefined) userUpdate.lastName = data.lastName;
+        if (data.phone !== undefined) userUpdate.phone = data.phone;
+        if (data.dni !== undefined) userUpdate.dni = data.dni || null;
+        if (data.identityStatus !== undefined) {
+            userUpdate.identityStatus = data.identityStatus;
+            if (data.identityStatus === 'verified' && !user.diditVerifiedAt) {
+                userUpdate.diditVerifiedAt = new Date();
+            }
+        }
+
+        // Recompute "name" from firstName + lastName
+        if (data.firstName !== undefined || data.lastName !== undefined) {
+            const fn = data.firstName ?? user.firstName ?? '';
+            const ln = data.lastName ?? user.lastName ?? '';
+            userUpdate.name = `${fn} ${ln}`.trim() || null;
+        }
+
+        if (Object.keys(userUpdate).length > 0) {
+            await this.prisma.user.update({ where: { id: userId }, data: userUpdate });
+        }
+
+        // Update address on Family record if applicable
+        if (data.address !== undefined && user.family) {
+            await this.prisma.family.update({
+                where: { id: user.family.id },
+                data: { address: data.address },
+            });
+        }
+
+        return this.getUserDetail(userId);
     }
 
     async updateUserRole(userId: string, role: string) {
