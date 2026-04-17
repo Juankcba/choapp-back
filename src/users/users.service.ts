@@ -52,9 +52,28 @@ export class UsersService {
     }
 
     async updateProfile(id: string, data: any) {
+        const mapped: any = {};
+        if (data.firstName !== undefined) mapped.firstName = data.firstName;
+        if (data.lastName !== undefined) mapped.lastName = data.lastName;
+        if (data.phone !== undefined) mapped.phone = data.phone;
+        // Accept either `image` or `profileImage` from the client
+        const image = data.image ?? data.profileImage;
+        if (image !== undefined) mapped.image = image;
+        // Keep `name` in sync with first+last when either changes
+        if (data.firstName !== undefined || data.lastName !== undefined) {
+            const current = await this.prisma.user.findUnique({
+                where: { id },
+                select: { firstName: true, lastName: true },
+            });
+            const first = data.firstName ?? current?.firstName ?? '';
+            const last = data.lastName ?? current?.lastName ?? '';
+            const composed = `${first} ${last}`.trim();
+            if (composed) mapped.name = composed;
+        }
+
         const user = await this.prisma.user.update({
             where: { id },
-            data,
+            data: mapped,
         });
         const { password, ...result } = user;
         return result;
