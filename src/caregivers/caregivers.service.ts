@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { isValidCoord } from '../common/coords';
 
 const CREDENTIAL_KINDS = ['certification', 'course', 'experience'] as const;
 type CredentialKind = typeof CREDENTIAL_KINDS[number];
@@ -25,7 +26,18 @@ export class CaregiversService {
     async getProfile(userId: string) {
         const caregiver = await this.prisma.caregiver.findUnique({
             where: { userId },
-            include: { user: { select: { email: true, firstName: true, lastName: true, phone: true, image: true } } },
+            include: {
+                user: {
+                    select: {
+                        email: true,
+                        firstName: true,
+                        lastName: true,
+                        phone: true,
+                        image: true,
+                        identityStatus: true,
+                    },
+                },
+            },
         });
         if (!caregiver) throw new NotFoundException('Caregiver profile not found');
         return caregiver;
@@ -95,10 +107,54 @@ export class CaregiversService {
     }
 
     async updateAvailability(userId: string, isAvailable: boolean) {
+        if (isAvailable) {
+            const caregiver = await this.prisma.caregiver.findUnique({
+                where: { userId },
+                include: { user: { select: { identityStatus: true } } },
+            });
+            if (!caregiver) throw new NotFoundException('Caregiver not found');
+
+            const reasons: string[] = [];
+            if (caregiver.user.identityStatus !== 'verified') {
+                reasons.push('Falta validar tu DNI (verificación de identidad)');
+            }
+            if (caregiver.verificationStatus !== 'verified') {
+                reasons.push('Tu perfil aún no fue aprobado por el equipo de CHO');
+            }
+            if (!isValidCoord(caregiver.locationLat, caregiver.locationLng)) {
+                reasons.push('Tenés que cargar tu ubicación (coordenadas) en tu perfil');
+            }
+            if (reasons.length) {
+                throw new BadRequestException({
+                    message: 'No podés marcarte como disponible todavía',
+                    reasons,
+                });
+            }
+        }
+
         return this.prisma.caregiver.update({
             where: { userId },
             data: { isAvailable },
         });
+    }
+
+    async getPublicList() {
+        const caregivers = await this.prisma.caregiver.findMany({
+            where: {
+                verificationStatus: 'verified',
+                user: { identityStatus: 'verified' },
+            },
+            select: {
+                id: true,
+                locationLat: true,
+                locationLng: true,
+                updatedAt: true,
+            },
+        });
+
+        return caregivers
+            .filter((c) => isValidCoord(c.locationLat, c.locationLng))
+            .map((c) => ({ id: c.id, updatedAt: c.updatedAt }));
     }
 
     async getJobs(userId: string) {

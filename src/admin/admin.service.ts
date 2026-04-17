@@ -5,6 +5,7 @@ import { MatchingGateway } from '../matching/matching.gateway';
 import { MailService } from '../mail/mail.service';
 import { UsersService } from '../users/users.service';
 import { TelegramService } from '../telegram/telegram.service';
+import { isValidCoord } from '../common/coords';
 
 @Injectable()
 export class AdminService {
@@ -412,24 +413,8 @@ export class AdminService {
         };
     }
 
-    /**
-     * Validate coordinates: must be valid numbers within Earth bounds.
-     * Also filters obvious noise: (0,0), default Buenos Aires center, swapped lat/lng.
-     */
     private isValidCoord(lat: number | null | undefined, lng: number | null | undefined): boolean {
-        if (lat == null || lng == null) return false;
-        if (typeof lat !== 'number' || typeof lng !== 'number') return false;
-        if (isNaN(lat) || isNaN(lng)) return false;
-        if (!isFinite(lat) || !isFinite(lng)) return false;
-
-        // Earth bounds
-        if (lat < -90 || lat > 90) return false;
-        if (lng < -180 || lng > 180) return false;
-
-        // Reject (0, 0) — null island, default value
-        if (lat === 0 && lng === 0) return false;
-
-        return true;
+        return isValidCoord(lat, lng);
     }
 
     /**

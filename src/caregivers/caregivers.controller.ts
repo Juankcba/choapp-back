@@ -29,6 +29,11 @@ export class CaregiversController {
         return this.caregiversService.getPublicProfile(id);
     }
 
+    @Get('public/list')
+    async getPublicList() {
+        return this.caregiversService.getPublicList();
+    }
+
     @Post('profile')
     @Roles('caregiver')
     async createProfile(@Req() req: any, @Body() body: any) {
