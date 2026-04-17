@@ -76,6 +76,22 @@ export class AdminController {
         return this.adminService.clearFamilyLocation(id);
     }
 
+    @Patch('caregivers/:id/location')
+    async updateCaregiverLocation(
+        @Param('id') id: string,
+        @Body() body: { lat: number; lng: number },
+    ) {
+        return this.adminService.updateCaregiverLocation(id, body.lat, body.lng);
+    }
+
+    @Patch('families/:id/location')
+    async updateFamilyLocation(
+        @Param('id') id: string,
+        @Body() body: { lat: number; lng: number },
+    ) {
+        return this.adminService.updateFamilyLocation(id, body.lat, body.lng);
+    }
+
     // ─── DNI / Identity ─────────────────────────
 
     @Get('users/:id/identity')

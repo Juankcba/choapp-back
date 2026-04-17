@@ -480,6 +480,26 @@ export class AdminService {
         });
     }
 
+    async updateCaregiverLocation(caregiverId: string, lat: number, lng: number) {
+        if (!this.isValidCoord(lat, lng)) {
+            throw new Error('Coordenadas invalidas. Verifica el rango y formato.');
+        }
+        return this.prisma.caregiver.update({
+            where: { id: caregiverId },
+            data: { locationLat: lat, locationLng: lng },
+        });
+    }
+
+    async updateFamilyLocation(familyId: string, lat: number, lng: number) {
+        if (!this.isValidCoord(lat, lng)) {
+            throw new Error('Coordenadas invalidas. Verifica el rango y formato.');
+        }
+        return this.prisma.family.update({
+            where: { id: familyId },
+            data: { locationLat: lat, locationLng: lng },
+        });
+    }
+
     /**
      * Map data: services + caregivers + families with locations
      */
