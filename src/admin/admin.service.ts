@@ -358,27 +358,95 @@ export class AdminService {
      * Admin can read any service's chat conversation
      */
     async getServiceChat(serviceId: string) {
+        // Fetch the service + family first. We join caregivers manually below
+        // because Caregiver.user can be orphaned (Mongo referential integrity
+        // isn't enforced) and `include: { caregiver: { include: { user }}}`
+        // crashes when the relation resolves to null.
         const service = await this.prisma.service.findUnique({
             where: { id: serviceId },
-            include: {
-                family: { include: { user: { select: { firstName: true, lastName: true, name: true } } } },
-                caregiver: { include: { user: { select: { firstName: true, lastName: true, name: true } } } },
+            select: {
+                id: true,
+                serviceType: true,
+                status: true,
+                family: {
+                    select: {
+                        userId: true,
+                        user: { select: { firstName: true, lastName: true, name: true, image: true } },
+                    },
+                },
+            },
+        });
+        if (!service) {
+            return { service: null, conversations: [] };
+        }
+
+        const chats = await this.prisma.chat.findMany({
+            where: { serviceId },
+            orderBy: { updatedAt: 'desc' },
+            select: {
+                id: true,
+                caregiverId: true,
+                messages: true,
+                createdAt: true,
+                updatedAt: true,
             },
         });
 
-        const chat = await this.prisma.chat.findFirst({
-            where: { serviceId },
+        // Pre-fetch caregiver + user for every chat, tolerating broken relations.
+        const caregiverIds = [...new Set(chats.map((c) => c.caregiverId))];
+        const caregivers = caregiverIds.length
+            ? await this.prisma.caregiver.findMany({
+                where: { id: { in: caregiverIds } },
+                select: { id: true, userId: true },
+            })
+            : [];
+        const caregiverById = new Map(caregivers.map((c) => [c.id, c]));
+
+        const userIds = caregivers.map((c) => c.userId);
+        const users = userIds.length
+            ? await this.prisma.user.findMany({
+                where: { id: { in: userIds } },
+                select: { id: true, firstName: true, lastName: true, name: true, image: true },
+            })
+            : [];
+        const userById = new Map(users.map((u) => [u.id, u]));
+
+        const familyUserId = service.family?.userId ?? null;
+        const familyName =
+            service.family?.user?.name ||
+            `${service.family?.user?.firstName || ''} ${service.family?.user?.lastName || ''}`.trim() ||
+            'Familia';
+
+        const conversations = chats.map((chat) => {
+            const caregiver = caregiverById.get(chat.caregiverId);
+            const user = caregiver ? userById.get(caregiver.userId) : null;
+            const caregiverName =
+                user?.name ||
+                `${user?.firstName || ''} ${user?.lastName || ''}`.trim() ||
+                'Cuidador';
+            return {
+                id: chat.id,
+                caregiverId: chat.caregiverId,
+                caregiverUserId: caregiver?.userId ?? null,
+                caregiverName,
+                caregiverImage: user?.image || null,
+                messages: chat.messages || [],
+                messageCount: (chat.messages || []).length,
+                lastMessageAt: chat.updatedAt,
+                orphaned: !caregiver || !user,
+            };
         });
 
         return {
             service: {
-                id: service?.id,
-                serviceType: service?.serviceType,
-                status: service?.status,
-                familyName: service?.family?.user?.name || `${service?.family?.user?.firstName || ''} ${service?.family?.user?.lastName || ''}`.trim(),
-                caregiverName: service?.caregiver?.user?.name || `${service?.caregiver?.user?.firstName || ''} ${service?.caregiver?.user?.lastName || ''}`.trim(),
+                id: service.id,
+                serviceType: service.serviceType,
+                status: service.status,
+                familyUserId,
+                familyName,
+                familyImage: service.family?.user?.image || null,
             },
-            messages: chat?.messages || [],
+            conversations,
         };
     }
 
