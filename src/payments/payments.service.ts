@@ -631,6 +631,7 @@ export class PaymentsService {
             alzheimers: 'Alzheimer', physical_therapy: 'Terapia Física',
             companionship: 'Compañía', personal_care: 'Cuidado Personal',
             medication_management: 'Medicamentos', dementia_care: 'Demencia',
+            digital: 'Acompañamiento digital',
         };
         return types[type] || type;
     }

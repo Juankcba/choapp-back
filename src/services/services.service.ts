@@ -6,7 +6,7 @@ import { MailService } from '../mail/mail.service';
 import { UsersService } from '../users/users.service';
 import { QueueService } from '../queue/queue.service';
 import { VideoSessionsService } from '../video-sessions/video-sessions.service';
-import { isSpecialty } from '../common/specialties';
+import { isSpecialty, VIRTUAL_FRIENDLY_SPECIALTIES } from '../common/specialties';
 
 @Injectable()
 export class ServicesService {
@@ -35,6 +35,15 @@ export class ServicesService {
                     'Un servicio virtual requiere una especialidad válida (ver catálogo)',
                 );
             }
+            // La especialidad debe poder darse por videollamada. Prácticas que
+            // requieren contacto físico (administrar medicación, cuidado de
+            // adultos mayores, postoperatorio, etc.) quedan fuera del MVP de
+            // acompañamiento digital.
+            if (!(VIRTUAL_FRIENDLY_SPECIALTIES as readonly string[]).includes(data.specialty)) {
+                throw new BadRequestException(
+                    `La especialidad "${data.specialty}" no se puede prestar de forma virtual`,
+                );
+            }
             if (!data.sessionsPerWeek || data.sessionsPerWeek < 1) {
                 throw new BadRequestException('sessionsPerWeek requerido para servicios virtuales');
             }
@@ -54,11 +63,16 @@ export class ServicesService {
             }
         }
 
+        // En virtual, el "tipo de servicio" siempre es 'digital' — la variedad
+        // del paquete la da la especialidad (psicología, nutrición, etc.).
+        // Forzamos el valor acá para no depender de que el cliente lo mande bien.
+        const serviceType = modality === 'virtual' ? 'digital' : data.serviceType;
+
         const service = await this.prisma.service.create({
             data: {
                 familyId: family.id,
                 modality,
-                serviceType: data.serviceType,
+                serviceType,
                 specialty: data.specialty ?? null,
                 sessionsPerWeek: modality === 'virtual' ? data.sessionsPerWeek : null,
                 preferredSlots: modality === 'virtual' ? data.preferredSlots : [],
@@ -396,6 +410,7 @@ export class ServicesService {
             companionship: 'Compañía',
             personal_care: 'Cuidado Personal',
             dementia_care: 'Cuidado de Demencia',
+            digital: 'Acompañamiento digital',
         };
         return types[type] || type;
     }

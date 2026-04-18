@@ -497,6 +497,7 @@ export class MatchingService {
             companionship: 'Compañía',
             personal_care: 'Cuidado Personal',
             dementia_care: 'Cuidado de Demencia',
+            digital: 'Acompañamiento digital',
         };
         return types[type] || type;
     }
