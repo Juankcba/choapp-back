@@ -52,7 +52,52 @@ export class CaregiversService {
         return caregiver;
     }
 
+    /**
+     * Perfil del cuidador destinado a una familia que ya tiene relación con
+     * él (match interesado o cuidador asignado). A diferencia del público,
+     * NO filtra `isTestAccount`: la familia tiene que poder ver el perfil
+     * del cuidador que está considerando o con el que ya acordó, aunque la
+     * cuenta sea de prueba (ej: en staging o la primera ronda de betas).
+     */
+    async getProfileForFamily(caregiverId: string, familyUserId: string) {
+        const family = await this.prisma.family.findUnique({
+            where: { userId: familyUserId },
+            select: { id: true },
+        });
+        if (!family) throw new NotFoundException('Family profile not found');
+
+        // Validar relación: la familia interactuó con este cuidador (al menos
+        // una ServiceNotification) o le asignó un service.
+        const [notifCount, assignedCount] = await Promise.all([
+            this.prisma.serviceNotification.count({
+                where: {
+                    caregiverId,
+                    service: { familyId: family.id },
+                },
+            }),
+            this.prisma.service.count({
+                where: { caregiverId, familyId: family.id },
+            }),
+        ]);
+        if (notifCount === 0 && assignedCount === 0) {
+            // La familia no debería poder escrapear perfiles arbitrarios con
+            // este endpoint. Si no hay relación, respondemos como si no
+            // existiera — mismo shape que el público.
+            throw new NotFoundException('Caregiver not found');
+        }
+
+        // Reuso del builder del perfil, pero sin filtrar test accounts.
+        return this.buildCaregiverProfile(caregiverId, { allowTestAccount: true });
+    }
+
     async getPublicProfile(caregiverId: string) {
+        return this.buildCaregiverProfile(caregiverId, { allowTestAccount: false });
+    }
+
+    private async buildCaregiverProfile(
+        caregiverId: string,
+        opts: { allowTestAccount: boolean },
+    ) {
         const caregiver = await this.prisma.caregiver.findUnique({
             where: { id: caregiverId },
             select: {
@@ -84,7 +129,10 @@ export class CaregiversService {
                 identityStatus: true,
             },
         });
-        if (!user || user.isTestAccount) throw new NotFoundException('Caregiver not found');
+        if (!user) throw new NotFoundException('Caregiver not found');
+        if (!opts.allowTestAccount && user.isTestAccount) {
+            throw new NotFoundException('Caregiver not found');
+        }
 
         const reviews = await this.prisma.review.findMany({
             where: { caregiverId, reviewType: 'family_to_caregiver' },

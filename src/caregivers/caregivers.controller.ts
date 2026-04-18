@@ -31,6 +31,19 @@ export class CaregiversController {
         return this.caregiversService.getPublicProfile(id);
     }
 
+    /**
+     * Perfil del cuidador para una familia que tiene relación con él. Se
+     * diferencia de `/public` en que no filtra `isTestAccount` — útil para
+     * cuentas de prueba que están interactuando en staging o en beta.
+     * Valida ownership: solo retorna si la familia tiene ServiceNotification
+     * o Service asignado con ese cuidador.
+     */
+    @Get(':id/for-family')
+    @Roles('family')
+    async getForFamily(@Param('id') id: string, @Req() req: any) {
+        return this.caregiversService.getProfileForFamily(id, req.user.userId);
+    }
+
     @Get('public/list')
     @Public()
     async getPublicList() {
