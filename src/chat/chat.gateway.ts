@@ -10,8 +10,11 @@ import {
 import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { ChatService } from './chat.service';
-import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { UsersService } from '../users/users.service';
+
+// Preview length for the body of a chat push notification.
+const CHAT_PUSH_PREVIEW_CHARS = 120;
 
 @WebSocketGateway({
     cors: { origin: '*' },
@@ -30,8 +33,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     constructor(
         private readonly chatService: ChatService,
-        private readonly mailService: MailService,
         private readonly prisma: PrismaService,
+        private readonly usersService: UsersService,
     ) { }
 
     handleConnection(client: Socket) {
@@ -101,8 +104,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         const roomId = `chat_${data.serviceId}_${data.caregiverId}`;
         this.server.to(roomId).emit('newMessage', message);
 
-        // Check if the other party is online in this room, if not send email
-        this.notifyOfflineParty(data.serviceId, data.caregiverId, data.senderId, data.content);
+        // Push-notify the recipient if they are not actively in this room.
+        // Email fallback for unread messages is handled by a separate cron (Fase 4).
+        this.notifyRecipient(data.serviceId, data.caregiverId, data.senderId, data.content);
 
         return message;
     }
@@ -118,54 +122,54 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     /**
-     * If the other user in the 1v1 chat is offline, send them an email
+     * Push-notify the recipient of a message if they are not in the 1v1 chat
+     * room right now. If they are (foreground, same chat screen), they already
+     * got the `newMessage` event and we stay silent to avoid double-notifying.
+     *
+     * Email fallback for still-unread messages is handled by an independent
+     * cron (Fase 4) and intentionally not triggered here.
      */
-    private async notifyOfflineParty(serviceId: string, caregiverId: string, senderId: string, content: string) {
+    async notifyRecipient(serviceId: string, caregiverId: string, senderId: string, content: string) {
         try {
             const service = await this.prisma.service.findUnique({
                 where: { id: serviceId },
                 include: {
-                    family: { include: { user: { select: { id: true, email: true, firstName: true, name: true } } } },
-                    caregiver: { include: { user: { select: { id: true, email: true, firstName: true, name: true } } } },
+                    family: { include: { user: { select: { id: true, name: true, firstName: true } } } },
+                    caregiver: { include: { user: { select: { id: true, name: true, firstName: true } } } },
                 },
             });
-
             if (!service) return;
 
             const roomId = `chat_${serviceId}_${caregiverId}`;
             const familyUserId = service.family?.user?.id;
             const caregiverUserId = service.caregiver?.user?.id;
 
-            let recipientEmail: string | undefined;
-            let recipientName: string | undefined;
+            let recipientUserId: string | undefined;
             let senderName = 'Usuario';
 
             if (senderId === familyUserId && caregiverUserId) {
-                const roomUsers = this.roomUsers.get(roomId);
-                if (roomUsers?.has(caregiverUserId)) return;
-                recipientEmail = service.caregiver?.user?.email;
-                recipientName = service.caregiver?.user?.name || service.caregiver?.user?.firstName || 'Cuidador';
+                recipientUserId = caregiverUserId;
                 senderName = service.family?.user?.name || service.family?.user?.firstName || 'Familia';
             } else if (senderId === caregiverUserId && familyUserId) {
-                const roomUsers = this.roomUsers.get(roomId);
-                if (roomUsers?.has(familyUserId)) return;
-                recipientEmail = service.family?.user?.email;
-                recipientName = service.family?.user?.name || service.family?.user?.firstName || 'Familia';
+                recipientUserId = familyUserId;
                 senderName = service.caregiver?.user?.name || service.caregiver?.user?.firstName || 'Cuidador';
             }
 
-            if (recipientEmail && recipientName) {
-                await this.mailService.sendChatNotificationEmail(
-                    recipientEmail,
-                    recipientName,
-                    senderName,
-                    content,
-                    serviceId,
-                );
-                this.logger.log(`Sent chat email notification to ${recipientEmail}`);
-            }
+            if (!recipientUserId) return;
+            if (this.roomUsers.get(roomId)?.has(recipientUserId)) return;
+
+            const preview = content.length > CHAT_PUSH_PREVIEW_CHARS
+                ? `${content.slice(0, CHAT_PUSH_PREVIEW_CHARS).trimEnd()}…`
+                : content;
+
+            await this.usersService.sendPushToUser(
+                recipientUserId,
+                `💬 ${senderName}`,
+                preview,
+                { type: 'chat', serviceId, caregiverId },
+            );
         } catch (err) {
-            this.logger.error('Error sending chat email notification', err);
+            this.logger.error('Error sending chat push notification', err);
         }
     }
 }

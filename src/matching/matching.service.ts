@@ -4,6 +4,11 @@ import { MailService } from '../mail/mail.service';
 import { MatchingGateway } from './matching.gateway';
 import { UsersService } from '../users/users.service';
 
+// Fixed system-wide matching radius. Caregivers whose stored location is within
+// this distance from the service location are notified. `Caregiver.serviceRadius`
+// is currently ignored by the matching algorithm.
+export const SERVICE_RADIUS_KM = 30;
+
 interface NearbyCaregiver {
     id: string;
     userId: string;
@@ -78,10 +83,7 @@ export class MatchingService {
                 cg.locationLat, cg.locationLng,
             );
 
-            // serviceRadius is in meters, convert to km
-            const radiusKm = (cg.serviceRadius || 30000) / 1000;
-
-            if (distanceKm <= radiusKm) {
+            if (distanceKm <= SERVICE_RADIUS_KM) {
                 // Optional: filter by specialty match
                 if (serviceType && cg.specialties.length > 0) {
                     if (!cg.specialties.includes(serviceType)) continue;
