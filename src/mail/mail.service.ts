@@ -396,34 +396,108 @@ export class MailService {
     }
   }
 
-  // Email: Notify caregiver their account was verified/rejected
+  // Email: Notify caregiver their account was verified/rejected.
+  // When approved, include the public profile URL so the caregiver can share it.
   async sendAccountVerifiedEmail(
-    email: string, name: string, approved: boolean,
+    email: string, name: string, approved: boolean, caregiverId?: string,
   ): Promise<void> {
     try {
-      const subject = approved
-        ? `✅ ¡Tu cuenta fue verificada, ${name}!`
-        : `❌ Actualización de tu cuenta, ${name}`;
-      const body = approved
-        ? `
-          <h2 style="color:#16a34a;margin-bottom:16px;">¡Felicitaciones, ${name}! 🎉</h2>
-          <p>Tu cuenta de cuidador fue <strong>verificada exitosamente</strong>.</p>
-          <p>Ya podés empezar a recibir solicitudes de trabajo de familias cerca tuyo.</p>
-          <div style="text-align:center;margin:24px 0;">
-            <a href="${this.getFrontendUrl()}/caregiver/dashboard" style="display:inline-block;background:#16a34a;color:white;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:bold;font-size:16px;">Ir al Dashboard</a>
-          </div>
-        `
-        : `
-          <h2 style="color:#dc2626;margin-bottom:16px;">Actualización de tu cuenta</h2>
-          <p>Hola ${name}, lamentablemente tu cuenta no pudo ser verificada en este momento.</p>
-          <p>Si creés que es un error, contactanos respondiendo a este email.</p>
-        `;
-
-      await this.sendEmail(email, subject, this.baseLayout(body));
+      if (approved) {
+        await this.sendEmail(
+          email,
+          `✅ ¡Tu cuenta fue aprobada, ${name}!`,
+          this.accountApprovedTemplate(name, caregiverId),
+        );
+      } else {
+        await this.sendEmail(
+          email,
+          `Actualización sobre tu cuenta en CHO`,
+          this.accountRejectedTemplate(name),
+        );
+      }
       this.logger.log(`Account ${approved ? 'verified' : 'rejected'} email sent to ${email}`);
     } catch (error) {
       this.logger.error(`Failed to send verification email to ${email}`, error);
     }
+  }
+
+  private accountApprovedTemplate(name: string, caregiverId?: string): string {
+    const frontend = this.getFrontendUrl();
+    const profileUrl = caregiverId ? `${frontend}/cuidadores/${caregiverId}` : null;
+    const whatsappShareText = encodeURIComponent(
+      `¡Hola! Soy cuidador/a profesional en CHO. Si necesitás ayuda con el cuidado de un ser querido, mirá mi perfil:${profileUrl ? ` ${profileUrl}` : ''}`,
+    );
+    const whatsappShareUrl = profileUrl ? `https://wa.me/?text=${whatsappShareText}` : null;
+
+    return this.baseLayout(`
+      <h2 style="margin:0 0 16px;color:#16a34a;font-size:24px;">¡Felicitaciones, ${name}! 🎉</h2>
+      <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
+        Tu cuenta de cuidador/a fue <strong>aprobada por el equipo de CHO</strong>. A partir de ahora
+        tu perfil es público y familias que busquen cuidado cerca tuyo pueden encontrarte.
+      </p>
+
+      ${profileUrl ? `
+      <div style="background:linear-gradient(135deg,#ecfdf5,#d1fae5);border-radius:12px;padding:24px;margin:0 0 24px;border:1px solid #bbf7d0;">
+        <p style="margin:0 0 8px;color:#065f46;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">
+          🔗 Tu perfil público
+        </p>
+        <p style="margin:0 0 16px;color:#047857;font-size:14px;word-break:break-all;font-family:monospace;">
+          ${profileUrl}
+        </p>
+        <div style="text-align:center;">
+          <a href="${profileUrl}" style="display:inline-block;background:#16a34a;color:white;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;font-size:15px;">
+            Ver mi perfil público
+          </a>
+        </div>
+      </div>
+
+      <div style="background:#f9fafb;border-radius:12px;padding:20px;margin:0 0 24px;">
+        <p style="margin:0 0 12px;color:#111827;font-size:15px;font-weight:600;">📣 Compartí tu perfil</p>
+        <p style="margin:0 0 16px;color:#4b5563;font-size:14px;line-height:1.5;">
+          Cuantas más personas lo vean, más chances tenés de recibir trabajos. Compartilo con tus contactos por WhatsApp,
+          redes sociales o pegalo en tu perfil de LinkedIn.
+        </p>
+        ${whatsappShareUrl ? `
+        <div style="text-align:center;">
+          <a href="${whatsappShareUrl}" style="display:inline-block;background:#25d366;color:white;text-decoration:none;padding:10px 24px;border-radius:8px;font-weight:600;font-size:14px;">
+            Compartir por WhatsApp
+          </a>
+        </div>` : ''}
+      </div>
+      ` : ''}
+
+      <div style="background:#eff6ff;border-radius:12px;padding:20px;margin:0 0 24px;">
+        <p style="margin:0 0 8px;color:#1e40af;font-size:15px;font-weight:600;">🚀 ¿Qué sigue?</p>
+        <ul style="margin:0;padding-left:20px;color:#1e3a8a;font-size:14px;line-height:1.7;">
+          <li>Asegurate de tener tu <strong>ubicación cargada</strong> para que te encontremos.</li>
+          <li>Prendé el switch de <strong>Disponible</strong> en tu dashboard cuando quieras recibir solicitudes.</li>
+          <li>Cargá tus <strong>credenciales</strong> para generar más confianza con las familias.</li>
+        </ul>
+      </div>
+
+      <div style="text-align:center;margin:24px 0;">
+        <a href="${frontend}/caregiver/dashboard" style="display:inline-block;background:#0070f3;color:white;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:600;font-size:15px;">
+          Ir a mi dashboard
+        </a>
+      </div>
+
+      <p style="margin:0;color:#9ca3af;font-size:13px;text-align:center;">
+        Si tenés alguna duda, respondé este email y te contestamos a la brevedad.
+      </p>
+    `);
+  }
+
+  private accountRejectedTemplate(name: string): string {
+    return this.baseLayout(`
+      <h2 style="margin:0 0 16px;color:#dc2626;font-size:22px;">Actualización de tu cuenta</h2>
+      <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
+        Hola ${name}, lamentablemente tu cuenta no pudo ser aprobada en este momento.
+      </p>
+      <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
+        Si creés que es un error o querés entender los motivos, respondé este email
+        y un miembro del equipo te va a atender.
+      </p>
+    `);
   }
 
   // Email: Service completed → to family

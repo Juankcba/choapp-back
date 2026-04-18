@@ -64,11 +64,13 @@ export class AdminService {
                     : 'Tu cuenta fue rechazada. Contactá soporte para más información.',
             });
 
-            // Send email notification
+            // Send email notification (include caregiver.id on approval so the
+            // email can link to the public profile the caregiver can share).
             this.mailService.sendAccountVerifiedEmail(
                 caregiver.user.email,
                 caregiver.user.name || caregiver.user.firstName || 'Cuidador',
                 approved,
+                approved ? caregiver.id : undefined,
             ).catch(() => { /* non-blocking */ });
 
             // Log to Telegram
