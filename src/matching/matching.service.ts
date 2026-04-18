@@ -319,6 +319,74 @@ export class MatchingService {
     }
 
     /**
+     * Re-matchea servicios ya creados contra un cuidador que acaba de
+     * actualizar su perfil (nuevas specialties, primera ubicación, etc.).
+     * Busca services `pending` o `matched` de los últimos 30 días que podrían
+     * matchear con sus specialties y dispara `notifyNearbyCaregivers` para
+     * cada uno. El método es idempotente: si el cuidador ya tenía una
+     * `ServiceNotification` para ese service, no se duplica nada. Si no la
+     * tenía, se crea + sale email + push — mismo pipeline que cuando la
+     * familia crea el service desde cero.
+     *
+     * Útil para el caso del cuidador que se registra como "digital" después
+     * de que una familia ya publicó su paquete, o que cargó su ubicación
+     * recién ahora. Antes dependía del cron de 10 min que saltea services
+     * con 5+ notifications o ya en estado `matched`.
+     */
+    async rematchForCaregiver(caregiverId: string): Promise<{ scanned: number; notified: number }> {
+        const caregiver = await this.prisma.caregiver.findUnique({
+            where: { id: caregiverId },
+        });
+        if (!caregiver) return { scanned: 0, notified: 0 };
+
+        // Si el cuidador no está activo o no disponible, no tiene sentido
+        // notificarle — `notifyNearbyCaregivers` lo filtraría igual pero nos
+        // ahorramos las queries.
+        if (!isActiveCaregiver(caregiver) || !caregiver.isAvailable) {
+            return { scanned: 0, notified: 0 };
+        }
+        if (caregiver.specialties.length === 0) {
+            return { scanned: 0, notified: 0 };
+        }
+
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60_000);
+        const services = await this.prisma.service.findMany({
+            where: {
+                status: { in: ['pending', 'matched'] },
+                createdAt: { gte: thirtyDaysAgo },
+                OR: [
+                    // Virtual: match por specialty declarada.
+                    { modality: 'virtual', specialty: { in: caregiver.specialties } },
+                    // Presencial con specialty nueva.
+                    { modality: 'in_person', specialty: { in: caregiver.specialties } },
+                    // Presencial por serviceType (legacy / cuando la familia no
+                    // completó specialty — el matching original usaba serviceType).
+                    { modality: 'in_person', serviceType: { in: caregiver.specialties } },
+                    // Services viejos sin modality seteada (antes del feature
+                    // virtual). Son todos presenciales por default.
+                    { modality: null, serviceType: { in: caregiver.specialties } } as any,
+                ],
+            },
+            select: { id: true },
+        });
+
+        let notified = 0;
+        for (const s of services) {
+            try {
+                const r = await this.notifyNearbyCaregivers(s.id);
+                notified += r.notified;
+            } catch (err) {
+                this.logger.error(`rematchForCaregiver: failed service ${s.id}`, err as Error);
+            }
+        }
+
+        this.logger.log(
+            `Rematch para cuidador ${caregiverId}: escaneados=${services.length}, notificados=${notified}`,
+        );
+        return { scanned: services.length, notified };
+    }
+
+    /**
      * Caregiver expresses interest in a service (does NOT assign them)
      */
     async respondToService(caregiverId: string, serviceId: string, interested: boolean) {

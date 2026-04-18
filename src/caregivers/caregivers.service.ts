@@ -1,10 +1,11 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { isValidCoord } from '../common/coords';
 import { jitterCoord } from '../common/jitter';
 import { findProvince, isInProvince } from '../common/provinces';
 import { effectiveActivationStatus, isActiveCaregiver } from '../common/activation';
+import { MatchingService } from '../matching/matching.service';
 
 const CREDENTIAL_KINDS = ['certification', 'course', 'experience'] as const;
 type CredentialKind = typeof CREDENTIAL_KINDS[number];
@@ -24,7 +25,12 @@ interface CredentialInput {
 
 @Injectable()
 export class CaregiversService {
-    constructor(private prisma: PrismaService) { }
+    private readonly logger = new Logger(CaregiversService.name);
+
+    constructor(
+        private prisma: PrismaService,
+        private matchingService: MatchingService,
+    ) { }
 
     async getProfile(userId: string) {
         const caregiver = await this.prisma.caregiver.findUnique({
@@ -151,11 +157,46 @@ export class CaregiversService {
         if (data.bankAlias !== undefined) mappedData.bankAlias = data.bankAlias;
         if (data.bankName !== undefined) mappedData.bankName = data.bankName;
 
-        return this.prisma.caregiver.upsert({
+        // Snapshot del estado previo para detectar cambios relevantes para el
+        // re-matching (cuidador que recién ahora es candidato a un service ya
+        // publicado).
+        const previous = await this.prisma.caregiver.findUnique({
+            where: { userId },
+            select: {
+                id: true,
+                specialties: true,
+                locationLat: true,
+                locationLng: true,
+                isAvailable: true,
+            },
+        });
+
+        const updated = await this.prisma.caregiver.upsert({
             where: { userId },
             update: mappedData,
             create: { userId, ...mappedData },
         });
+
+        // Re-match solo si hubo cambio real en specialties o en coordenadas.
+        // Evita disparar re-matching en updates que tocan bio / tarifa / banco.
+        const prevSpecialties = (previous?.specialties ?? []).slice().sort().join(',');
+        const nextSpecialties = (updated.specialties ?? []).slice().sort().join(',');
+        const specialtiesChanged = prevSpecialties !== nextSpecialties;
+        const locationChanged = (previous?.locationLat ?? null) !== (updated.locationLat ?? null)
+            || (previous?.locationLng ?? null) !== (updated.locationLng ?? null);
+        const justBecameAvailable = previous?.isAvailable === false && updated.isAvailable === true;
+
+        if (specialtiesChanged || locationChanged || justBecameAvailable) {
+            this.matchingService.rematchForCaregiver(updated.id)
+                .then(r => this.logger.log(
+                    `Rematch cuidador ${updated.id}: escaneados=${r.scanned}, notificados=${r.notified}`,
+                ))
+                .catch(err => this.logger.error(
+                    `rematchForCaregiver failed for ${updated.id}`, err as Error,
+                ));
+        }
+
+        return updated;
     }
 
     async updateAvailability(userId: string, isAvailable: boolean) {
