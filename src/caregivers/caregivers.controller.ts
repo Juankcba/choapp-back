@@ -6,6 +6,7 @@ import {
     Post,
     Body,
     Param,
+    Query,
     Req,
     UseGuards,
 } from '@nestjs/common';
@@ -40,6 +41,12 @@ export class CaregiversController {
     @Public()
     async getPublicStats() {
         return this.caregiversService.getPublicStats();
+    }
+
+    @Get('public/search')
+    @Public()
+    async getPublicSearch(@Query('province') province?: string) {
+        return this.caregiversService.getPublicSearch(province);
     }
 
     @Post('profile')

@@ -2,6 +2,8 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { isValidCoord } from '../common/coords';
+import { jitterCoord } from '../common/jitter';
+import { findProvince, isInProvince } from '../common/provinces';
 
 const CREDENTIAL_KINDS = ['certification', 'course', 'experience'] as const;
 type CredentialKind = typeof CREDENTIAL_KINDS[number];
@@ -160,6 +162,60 @@ export class CaregiversService {
             verifiedCaregivers,
             averageRating: Math.round(avg * 10) / 10,
             totalReviews,
+        };
+    }
+
+    async getPublicSearch(provinceSlug?: string | null) {
+        const province = findProvince(provinceSlug);
+
+        const caregivers = await this.prisma.caregiver.findMany({
+            where: {
+                verificationStatus: 'verified',
+                user: { identityStatus: 'verified' },
+            },
+            select: {
+                id: true,
+                bio: true,
+                specialties: true,
+                experience: true,
+                hourlyRate: true,
+                rating: true,
+                totalReviews: true,
+                totalServices: true,
+                locationLat: true,
+                locationLng: true,
+                user: { select: { firstName: true, lastName: true, name: true, image: true } },
+            },
+        });
+
+        const items = caregivers
+            .filter((c) => isValidCoord(c.locationLat, c.locationLng))
+            .filter((c) => (province ? isInProvince(c.locationLat!, c.locationLng!, province) : true))
+            .map((c) => {
+                const { lat, lng } = jitterCoord(c.locationLat!, c.locationLng!, c.id, 3000);
+                return {
+                    id: c.id,
+                    firstName: c.user.firstName,
+                    name: c.user.name,
+                    image: c.user.image,
+                    bio: c.bio,
+                    specialties: c.specialties,
+                    experience: c.experience,
+                    hourlyRate: c.hourlyRate,
+                    rating: c.rating,
+                    totalReviews: c.totalReviews,
+                    totalServices: c.totalServices,
+                    lat,
+                    lng,
+                };
+            });
+
+        return {
+            province: province
+                ? { slug: province.slug, name: province.name, center: province.center, zoom: province.zoom }
+                : null,
+            total: items.length,
+            caregivers: items,
         };
     }
 
