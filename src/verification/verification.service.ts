@@ -167,7 +167,18 @@ export class VerificationService {
             updateData.diditVerifiedAt = new Date();
         }
         if (dni) {
-            updateData.dni = dni;
+            // App-level uniqueness check (no DB @unique on dni to avoid null collisions).
+            const existing = await this.prisma.user.findFirst({
+                where: { dni, id: { not: user.id } },
+                select: { id: true, email: true },
+            });
+            if (existing) {
+                this.logger.warn(
+                    `DNI ${dni} already registered for user ${existing.id} (${existing.email}); skipping dni update on ${user.id}`,
+                );
+            } else {
+                updateData.dni = dni;
+            }
         }
 
         await this.prisma.user.update({

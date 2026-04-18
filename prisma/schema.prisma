@@ -74,8 +74,11 @@ model User {
   // Exclude from all public listings (map, sitemap, stats, search).
   // Used for internal test accounts that should not leak to production visitors.
   isTestAccount Boolean   @default(false)
-  // Identity verification (KYC via Didit)
-  dni                   String?   @unique
+  // Identity verification (KYC via Didit).
+  // dni is NOT a Prisma @unique: multiple users may have `dni: null` before
+  // completing KYC, which would violate a Mongo unique index. Uniqueness of
+  // non-null DNIs is enforced in application code (VerificationService).
+  dni                   String?
   identityStatus        String    @default("unverified") // unverified | pending | verified | rejected
   diditSessionId        String?
   diditVerifiedAt       DateTime?

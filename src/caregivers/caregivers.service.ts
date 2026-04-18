@@ -142,11 +142,16 @@ export class CaregiversService {
     }
 
     async getPublicStats() {
-        // All non-test caregivers (includes anyone with a profile, DNI-verified or not)
-        const allPublic = await this.prisma.caregiver.findMany({
-            where: { user: { isTestAccount: { not: true } } },
-            select: { id: true, user: { select: { identityStatus: true } } },
+        // Fetch everyone and filter test accounts in JS.
+        // Prisma's `{ not: true }` on Mongo can behave unexpectedly with
+        // documents that don't have the field set yet (pre-migration users).
+        const rows = await this.prisma.caregiver.findMany({
+            select: {
+                id: true,
+                user: { select: { identityStatus: true, isTestAccount: true } },
+            },
         });
+        const allPublic = rows.filter((c) => c.user.isTestAccount !== true);
 
         const totalCaregivers = allPublic.length;
         const verifiedCaregivers = allPublic.filter(
@@ -180,10 +185,8 @@ export class CaregiversService {
         // Loose filter: any non-test caregiver with valid coords shows up on the
         // map. The card badge differentiates DNI-verified vs admin-approved vs
         // unverified so the visitor knows what they're looking at.
+        // Test accounts filtered in JS (see getPublicStats for rationale).
         const caregivers = await this.prisma.caregiver.findMany({
-            where: {
-                user: { isTestAccount: { not: true } },
-            },
             select: {
                 id: true,
                 bio: true,
@@ -203,12 +206,14 @@ export class CaregiversService {
                         name: true,
                         image: true,
                         identityStatus: true,
+                        isTestAccount: true,
                     },
                 },
             },
         });
 
         const items = caregivers
+            .filter((c) => c.user.isTestAccount !== true)
             .filter((c) => isValidCoord(c.locationLat, c.locationLng))
             .filter((c) => (province ? isInProvince(c.locationLat!, c.locationLng!, province) : true))
             .map((c) => {
@@ -244,20 +249,24 @@ export class CaregiversService {
     }
 
     async getPublicList() {
+        // Strict filter for SEO sitemap: DNI-verified + admin-approved + not test.
+        // Test-account filter done in JS for robustness (see getPublicStats).
         const caregivers = await this.prisma.caregiver.findMany({
             where: {
                 verificationStatus: 'verified',
-                user: { identityStatus: 'verified', isTestAccount: { not: true } },
+                user: { identityStatus: 'verified' },
             },
             select: {
                 id: true,
                 locationLat: true,
                 locationLng: true,
                 updatedAt: true,
+                user: { select: { isTestAccount: true } },
             },
         });
 
         return caregivers
+            .filter((c) => c.user.isTestAccount !== true)
             .filter((c) => isValidCoord(c.locationLat, c.locationLng))
             .map((c) => ({ id: c.id, updatedAt: c.updatedAt }));
     }
