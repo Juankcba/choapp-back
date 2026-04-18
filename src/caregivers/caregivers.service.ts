@@ -120,9 +120,6 @@ export class CaregiversService {
             // professional capabilities.
             identityVerified: user.identityStatus === 'verified',
             dniVerified: user.identityStatus === 'verified',
-            // Deprecated: frontend should read `identityVerified`. Kept for a
-            // deploy window; remove once clients stop consuming it.
-            verifiedByCho: caregiver.verificationStatus === 'verified',
             certifications: caregiver.certifications || [],
             reviews: reviews.map((r) => ({
                 id: r.id,
@@ -294,8 +291,6 @@ export class CaregiversService {
                     totalServices: c.totalServices,
                     identityVerified: user!.identityStatus === 'verified',
                     dniVerified: user!.identityStatus === 'verified',
-                    // Deprecated: see note in getPublicProfile.
-                    verifiedByCho: c.verificationStatus === 'verified',
                     lat,
                     lng,
                 };
