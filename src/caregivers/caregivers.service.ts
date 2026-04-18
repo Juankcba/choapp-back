@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { isValidCoord } from '../common/coords';
 import { jitterCoord } from '../common/jitter';
 import { findProvince, isInProvince } from '../common/provinces';
+import { effectiveActivationStatus, isActiveCaregiver } from '../common/activation';
 
 const CREDENTIAL_KINDS = ['certification', 'course', 'experience'] as const;
 type CredentialKind = typeof CREDENTIAL_KINDS[number];
@@ -58,6 +59,7 @@ export class CaregiversService {
                 rating: true,
                 totalReviews: true,
                 totalServices: true,
+                activationStatus: true,
                 verificationStatus: true,
                 certifications: true,
             },
@@ -114,6 +116,8 @@ export class CaregiversService {
             rating: caregiver.rating,
             totalReviews: caregiver.totalReviews,
             totalServices: caregiver.totalServices,
+            activationStatus: effectiveActivationStatus(caregiver),
+            // Legacy, kept during migration. Prefer `activationStatus`.
             verificationStatus: caregiver.verificationStatus,
             // Caregiver completed KYC (DNI) via Didit. This is what the UI should
             // surface as "Identidad verificada" — CHO does NOT vouch for their
@@ -166,7 +170,7 @@ export class CaregiversService {
             if (caregiver.user.identityStatus !== 'verified') {
                 reasons.push('Falta validar tu DNI (verificación de identidad)');
             }
-            if (caregiver.verificationStatus !== 'verified') {
+            if (!isActiveCaregiver(caregiver)) {
                 reasons.push('Todavía tenés que terminar de completar tu perfil (datos, documentación y ubicación)');
             }
             if (!isValidCoord(caregiver.locationLat, caregiver.locationLng)) {
@@ -264,6 +268,7 @@ export class CaregiversService {
                 rating: true,
                 totalReviews: true,
                 totalServices: true,
+                activationStatus: true,
                 verificationStatus: true,
                 locationLat: true,
                 locationLng: true,
@@ -306,15 +311,22 @@ export class CaregiversService {
     }
 
     async getPublicList() {
-        // Strict filter for SEO sitemap: DNI-verified + admin-approved + not test.
-        // Test-account filter done in JS for robustness (see getPublicStats).
+        // SEO sitemap: surface caregivers that are KYC-verified and fully activated
+        // (registration complete), plus filter out test accounts. During the
+        // verificationStatus → activationStatus transition we accept either
+        // column as "active" through the helper.
         const caregivers = await this.prisma.caregiver.findMany({
             where: {
-                verificationStatus: 'verified',
+                OR: [
+                    { activationStatus: 'active' },
+                    { AND: [{ activationStatus: 'pending' }, { verificationStatus: 'verified' }] },
+                ],
                 user: { identityStatus: 'verified' },
             },
             select: {
                 id: true,
+                activationStatus: true,
+                verificationStatus: true,
                 locationLat: true,
                 locationLng: true,
                 updatedAt: true,
@@ -324,6 +336,7 @@ export class CaregiversService {
 
         return caregivers
             .filter((c) => c.user.isTestAccount !== true)
+            .filter((c) => isActiveCaregiver(c))
             .filter((c) => isValidCoord(c.locationLat, c.locationLng))
             .map((c) => ({ id: c.id, updatedAt: c.updatedAt }));
     }

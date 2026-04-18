@@ -187,6 +187,20 @@ export class AdminController {
         return this.adminService.getPendingCaregivers();
     }
 
+    @Post('caregivers/:id/activate')
+    async activateCaregiver(@Param('id') id: string) {
+        return this.adminService.setActivationStatus(id, 'active');
+    }
+
+    @Post('caregivers/:id/suspend')
+    async suspendCaregiver(@Param('id') id: string) {
+        return this.adminService.setActivationStatus(id, 'suspended');
+    }
+
+    /**
+     * @deprecated legacy endpoint from the "verify professional" flow. Prefer
+     * `activate` / `suspend`. Kept so the existing admin UI keeps working.
+     */
     @Post('caregivers/:id/verify')
     async verifyCaregiver(
         @Param('id') id: string,

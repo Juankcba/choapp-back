@@ -19,6 +19,7 @@ function makeCaregiver(overrides: Partial<any>): any {
         id: 'cg-id',
         userId: 'user-id',
         isAvailable: true,
+        activationStatus: 'active',
         verificationStatus: 'verified',
         locationLat: BA_LAT,
         locationLng: BA_LNG,

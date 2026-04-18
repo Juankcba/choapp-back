@@ -6,6 +6,11 @@ import { MailService } from '../mail/mail.service';
 import { UsersService } from '../users/users.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { isValidCoord } from '../common/coords';
+import {
+    ActivationStatus,
+    effectiveActivationStatus,
+    legacyMirrorOf,
+} from '../common/activation';
 
 @Injectable()
 export class AdminService {
@@ -38,9 +43,16 @@ export class AdminService {
     async getPendingCaregivers() {
         const validUserIds = (await this.prisma.user.findMany({ select: { id: true } })).map(u => u.id);
 
+        // Caregivers that still need the admin to confirm the registration is
+        // complete (or legacy pending docs before the activationStatus column
+        // was introduced). The admin does NOT evaluate professional capability
+        // here — only that KYC, record and profile data are in place.
         return this.prisma.caregiver.findMany({
             where: {
-                verificationStatus: 'pending',
+                OR: [
+                    { activationStatus: 'pending' },
+                    { verificationStatus: 'pending' },
+                ],
                 userId: { in: validUserIds },
             },
             include: { user: { select: { email: true, firstName: true, lastName: true, name: true, phone: true, createdAt: true } } },
@@ -48,39 +60,62 @@ export class AdminService {
         });
     }
 
-    async verifyCaregiver(caregiverId: string, approved: boolean) {
+    /**
+     * Update the caregiver's activation state. This is the single write path —
+     * we write both the new `activationStatus` column and the legacy
+     * `verificationStatus` mirror until all readers are migrated.
+     *
+     * Allowed transitions under the new positioning:
+     *   pending   → active    (registration complete, account can operate)
+     *   active    → suspended (CHO suspended the account, e.g. after a report)
+     *   suspended → active    (suspension lifted)
+     */
+    async setActivationStatus(caregiverId: string, status: ActivationStatus) {
         const caregiver = await this.prisma.caregiver.update({
             where: { id: caregiverId },
-            data: { verificationStatus: approved ? 'verified' : 'rejected' },
+            data: {
+                activationStatus: status,
+                verificationStatus: legacyMirrorOf(status),
+            },
             include: { user: true },
         });
 
-        // Notify caregiver in real-time
         if (caregiver.user) {
+            const approved = status === 'active';
             this.matchingGateway.emitToUser(caregiver.userId, 'account-verified', {
                 status: approved ? 'verified' : 'rejected',
                 message: approved
-                    ? '¡Tu cuenta fue verificada! Ya podés recibir solicitudes de trabajo.'
-                    : 'Tu cuenta fue rechazada. Contactá soporte para más información.',
+                    ? '¡Tu perfil en CHO ya está activo! Ya podés recibir solicitudes.'
+                    : status === 'suspended'
+                        ? 'Tu cuenta fue suspendida. Contactá soporte para más información.'
+                        : 'Tu cuenta vuelve a estar en revisión.',
             });
 
-            // Send email notification (include caregiver.id on approval so the
-            // email can link to the public profile the caregiver can share).
-            this.mailService.sendAccountVerifiedEmail(
-                caregiver.user.email,
-                caregiver.user.name || caregiver.user.firstName || 'Cuidador',
-                approved,
-                approved ? caregiver.id : undefined,
-            ).catch(() => { /* non-blocking */ });
+            if (status === 'active' || status === 'suspended') {
+                this.mailService.sendAccountVerifiedEmail(
+                    caregiver.user.email,
+                    caregiver.user.name || caregiver.user.firstName || 'Cuidador',
+                    approved,
+                    approved ? caregiver.id : undefined,
+                ).catch(() => { /* non-blocking */ });
 
-            // Log to Telegram
-            this.telegramService.sendLog(approved ? 'caregiver.verified' : 'caregiver.rejected', {
-                name: caregiver.user.name || caregiver.user.firstName || 'Cuidador',
-                email: caregiver.user.email,
-            }).catch(() => { /* non-blocking */ });
+                this.telegramService.sendLog(approved ? 'caregiver.activated' : 'caregiver.suspended', {
+                    name: caregiver.user.name || caregiver.user.firstName || 'Cuidador',
+                    email: caregiver.user.email,
+                }).catch(() => { /* non-blocking */ });
+            }
         }
 
         return caregiver;
+    }
+
+    /**
+     * @deprecated Prefer `setActivationStatus`. Legacy boolean-based entry point
+     * kept so the existing admin UI and `POST /admin/caregivers/:id/verify`
+     * endpoint keep working during the transition.
+     */
+    async verifyCaregiver(caregiverId: string, approved: boolean) {
+        return this.setActivationStatus(caregiverId, approved ? 'active' : 'suspended');
     }
 
     // ─── User Management ─────────────────────────
@@ -204,7 +239,7 @@ export class AdminService {
 
         if (user.role === 'caregiver' && user.caregiver) {
             steps.onboardingCompleted = !!(user.caregiver as any).bio || !!(user.caregiver as any).experience;
-            steps.caregiverVerified = (user.caregiver as any).verificationStatus === 'verified';
+            steps.caregiverVerified = effectiveActivationStatus(user.caregiver as any) === 'active';
         } else if (user.role === 'family' && user.family) {
             steps.onboardingCompleted = !!(user.family as any).address;
         }
@@ -666,7 +701,7 @@ export class AdminService {
                 orderBy: { createdAt: 'desc' },
                 take: 200,
             }),
-            // Show ALL caregivers with location (verified or not)
+            // Show ALL caregivers with location (active or not)
             this.prisma.caregiver.findMany({
                 where: {
                     locationLat: { not: null },
@@ -681,6 +716,7 @@ export class AdminService {
                     hourlyRate: true,
                     experience: true,
                     isAvailable: true,
+                    activationStatus: true,
                     verificationStatus: true,
                     user: { select: { id: true, firstName: true, lastName: true, name: true, email: true, phone: true, fcmTokens: true } },
                 },
@@ -743,6 +779,8 @@ export class AdminService {
                 hourlyRate: c.hourlyRate,
                 experience: c.experience,
                 isAvailable: c.isAvailable,
+                activationStatus: effectiveActivationStatus(c as any),
+                // Legacy mirror — remove after clients consume activationStatus.
                 verificationStatus: c.verificationStatus,
                 hasPushToken: (c.user?.fcmTokens || []).length > 0,
             }));

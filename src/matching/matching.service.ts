@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { MatchingGateway } from './matching.gateway';
 import { UsersService } from '../users/users.service';
+import { isActiveCaregiver } from '../common/activation';
 
 // Fixed system-wide matching radius. Caregivers whose stored location is within
 // this distance from the service location are notified. `Caregiver.serviceRadius`
@@ -60,11 +61,16 @@ export class MatchingService {
         serviceLng: number,
         serviceType?: string,
     ): Promise<NearbyCaregiver[]> {
-        // Get all available + verified caregivers with location
+        // Active + available caregivers with location. During the
+        // verificationStatus → activationStatus transition we accept both
+        // columns as "active" and confirm via the helper.
         const caregivers = await this.prisma.caregiver.findMany({
             where: {
                 isAvailable: true,
-                verificationStatus: 'verified',
+                OR: [
+                    { activationStatus: 'active' },
+                    { AND: [{ activationStatus: 'pending' }, { verificationStatus: 'verified' }] },
+                ],
                 locationLat: { not: null },
                 locationLng: { not: null },
             },

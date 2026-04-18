@@ -112,7 +112,15 @@ model Caregiver {
   serviceRadius      Int      @default(30000)
   locationLat        Float?
   locationLng        Float?
-  verificationStatus String   @default("pending") // pending | verified | rejected
+  // Account activation state under the new positioning (2026-04):
+  //   pending   = caregiver still needs to finish registration (KYC, record, profile).
+  //   active    = registration complete; caregiver can operate. CHO does NOT
+  //               vouch for professional capabilities — see positioning memory.
+  //   suspended = CHO suspended the account in response to a concrete report.
+  activationStatus   String   @default("pending")
+  // Legacy field kept during transition — mirrors activationStatus (verified↔active,
+  // rejected↔suspended). Will be removed after all clients consume activationStatus.
+  verificationStatus String   @default("pending")
   earningsTotal      Float    @default(0)
   earningsPending    Float    @default(0)
   earningsAvailable  Float    @default(0)
