@@ -71,6 +71,9 @@ model User {
   name          String?
   image         String?
   isActive      Boolean   @default(true)
+  // Exclude from all public listings (map, sitemap, stats, search).
+  // Used for internal test accounts that should not leak to production visitors.
+  isTestAccount Boolean   @default(false)
   // Identity verification (KYC via Didit)
   dni                   String?   @unique
   identityStatus        String    @default("unverified") // unverified | pending | verified | rejected

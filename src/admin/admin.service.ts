@@ -109,6 +109,7 @@ export class AdminService {
                 phone: true,
                 role: true,
                 isActive: true,
+                isTestAccount: true,
                 identityStatus: true,
                 dni: true,
                 image: true,
@@ -173,6 +174,7 @@ export class AdminService {
                 phone: true,
                 role: true,
                 isActive: true,
+                isTestAccount: true,
                 identityStatus: true,
                 dni: true,
                 image: true,
@@ -215,6 +217,27 @@ export class AdminService {
             criminalRecords,
             currentCriminalRecord: currentCriminal,
         };
+    }
+
+    async setTestAccountFlag(userId: string, isTestAccount: boolean) {
+        const user = await this.prisma.user.findUnique({ where: { id: userId } });
+        if (!user) throw new NotFoundException('Usuario no encontrado');
+
+        const updated = await this.prisma.user.update({
+            where: { id: userId },
+            data: { isTestAccount },
+            select: { id: true, email: true, name: true, firstName: true, role: true, isTestAccount: true },
+        });
+
+        this.telegramService
+            .sendLog(isTestAccount ? 'user.marked_as_test' : 'user.unmarked_as_test', {
+                name: updated.name || updated.firstName || updated.email,
+                email: updated.email,
+                role: updated.role,
+            })
+            .catch(() => { });
+
+        return { id: updated.id, isTestAccount: updated.isTestAccount };
     }
 
     async toggleUserActive(userId: string) {

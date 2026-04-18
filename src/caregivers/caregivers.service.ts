@@ -49,7 +49,7 @@ export class CaregiversService {
         const caregiver = await this.prisma.caregiver.findUnique({
             where: { id: caregiverId },
             include: {
-                user: { select: { firstName: true, lastName: true, name: true, image: true } },
+                user: { select: { firstName: true, lastName: true, name: true, image: true, isTestAccount: true } },
                 reviews: {
                     where: { reviewType: 'family_to_caregiver' },
                     orderBy: { createdAt: 'desc' },
@@ -65,6 +65,7 @@ export class CaregiversService {
             },
         });
         if (!caregiver) throw new NotFoundException('Caregiver not found');
+        if (caregiver.user.isTestAccount) throw new NotFoundException('Caregiver not found');
 
         return {
             id: caregiver.id,
@@ -141,25 +142,30 @@ export class CaregiversService {
     }
 
     async getPublicStats() {
-        const [verifiedCaregivers, reviewAgg] = await Promise.all([
-            this.prisma.caregiver.count({
-                where: {
-                    verificationStatus: 'verified',
-                    user: { identityStatus: 'verified' },
-                },
-            }),
-            this.prisma.review.aggregate({
-                where: { reviewType: 'family_to_caregiver' },
-                _avg: { rating: true },
-                _count: { rating: true },
-            }),
-        ]);
+        // Only count caregivers that are fully verified AND NOT a test account
+        const publicCaregivers = await this.prisma.caregiver.findMany({
+            where: {
+                verificationStatus: 'verified',
+                user: { identityStatus: 'verified', isTestAccount: { not: true } },
+            },
+            select: { id: true },
+        });
+        const publicCaregiverIds = publicCaregivers.map((c) => c.id);
+
+        const reviewAgg = await this.prisma.review.aggregate({
+            where: {
+                reviewType: 'family_to_caregiver',
+                caregiverId: { in: publicCaregiverIds },
+            },
+            _avg: { rating: true },
+            _count: { rating: true },
+        });
 
         const avg = reviewAgg._avg.rating ?? 0;
         const totalReviews = reviewAgg._count.rating ?? 0;
 
         return {
-            verifiedCaregivers,
+            verifiedCaregivers: publicCaregiverIds.length,
             averageRating: Math.round(avg * 10) / 10,
             totalReviews,
         };
@@ -171,7 +177,7 @@ export class CaregiversService {
         const caregivers = await this.prisma.caregiver.findMany({
             where: {
                 verificationStatus: 'verified',
-                user: { identityStatus: 'verified' },
+                user: { identityStatus: 'verified', isTestAccount: { not: true } },
             },
             select: {
                 id: true,
@@ -223,7 +229,7 @@ export class CaregiversService {
         const caregivers = await this.prisma.caregiver.findMany({
             where: {
                 verificationStatus: 'verified',
-                user: { identityStatus: 'verified' },
+                user: { identityStatus: 'verified', isTestAccount: { not: true } },
             },
             select: {
                 id: true,

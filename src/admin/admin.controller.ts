@@ -51,6 +51,14 @@ export class AdminController {
         return this.adminService.toggleUserActive(id);
     }
 
+    @Patch('users/:id/test-flag')
+    async setTestAccountFlag(
+        @Param('id') id: string,
+        @Body() body: { isTestAccount: boolean },
+    ) {
+        return this.adminService.setTestAccountFlag(id, !!body.isTestAccount);
+    }
+
     @Patch('users/:id/role')
     async updateUserRole(
         @Param('id') id: string,
