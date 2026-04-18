@@ -11,14 +11,25 @@ import { isActiveCaregiver } from '../common/activation';
 // is currently ignored by the matching algorithm.
 export const SERVICE_RADIUS_KM = 30;
 
+// Para servicios virtuales el matching ignora la distancia; `distance` queda
+// en null tanto en la lista de nearby como en la ServiceNotification.
 interface NearbyCaregiver {
     id: string;
     userId: string;
     email: string;
     name: string;
-    distance: number; // km
+    distance: number | null; // km, o null si el servicio es virtual
     specialties: string[];
     rating: number;
+}
+
+export interface MatchCriteria {
+    modality?: 'in_person' | 'virtual';
+    // Especialidad declarada buscada (ver common/specialties.ts). Si el service
+    // tiene specialty seteado, se filtra por eso. Si no, se usa serviceType
+    // como antes — pero para virtual siempre debería venir specialty.
+    specialty?: string;
+    serviceType?: string;
 }
 
 @Injectable()
@@ -56,16 +67,48 @@ export class MatchingService {
     }
 
     /**
-     * Find caregivers near a service location
+     * Find candidate caregivers for a service.
+     *
+     * - `in_person` (default): aplica filtro Haversine contra el radio fijo
+     *   `SERVICE_RADIUS_KM`. Cuidadores sin `locationLat/Lng` quedan fuera.
+     * - `virtual`: no aplica filtro geográfico. `serviceLat/Lng` se aceptan
+     *   pero se ignoran — el caller puede pasar (0, 0) o los del familiar sin
+     *   que afecte al resultado.
+     *
+     * `criteria.specialty` tiene prioridad sobre `criteria.serviceType` a la
+     * hora de filtrar por especialidad. Si ninguno viene, no se filtra por
+     * especialidad. Cuidadores con `specialties = []` siempre pasan el filtro
+     * (no declaran especialidad → no excluir).
+     *
+     * Overloads: la firma `(lat, lng, serviceType?)` queda por retrocompat con
+     * callers que sólo pasan string.
      */
-    async findNearbyCaregivers(
+    findNearbyCaregivers(
         serviceLat: number,
         serviceLng: number,
         serviceType?: string,
+    ): Promise<NearbyCaregiver[]>;
+    findNearbyCaregivers(
+        serviceLat: number,
+        serviceLng: number,
+        criteria: MatchCriteria,
+    ): Promise<NearbyCaregiver[]>;
+    async findNearbyCaregivers(
+        serviceLat: number,
+        serviceLng: number,
+        criteriaOrServiceType?: string | MatchCriteria,
     ): Promise<NearbyCaregiver[]> {
-        // Active + available caregivers with location. During the
-        // verificationStatus → activationStatus transition we accept both
-        // columns as "active" and confirm via the helper.
+        const criteria: MatchCriteria =
+            typeof criteriaOrServiceType === 'string'
+                ? { serviceType: criteriaOrServiceType }
+                : (criteriaOrServiceType ?? {});
+
+        const isVirtual = criteria.modality === 'virtual';
+        // Filtro de especialidad efectivo: specialty (explícito) > serviceType (legacy).
+        const specialtyFilter = criteria.specialty ?? criteria.serviceType;
+
+        // Active + available caregivers. Para presencial exigimos coords; para
+        // virtual no hace falta, pero igual pedimos activación + disponibilidad.
         const caregivers = await this.prisma.caregiver.findMany({
             where: {
                 isAvailable: true,
@@ -73,8 +116,12 @@ export class MatchingService {
                     { activationStatus: 'active' },
                     { AND: [{ activationStatus: 'pending' }, { verificationStatus: 'verified' }] },
                 ],
-                locationLat: { not: null },
-                locationLng: { not: null },
+                ...(isVirtual
+                    ? {}
+                    : {
+                        locationLat: { not: null },
+                        locationLng: { not: null },
+                    }),
             },
             include: {
                 user: { select: { email: true, firstName: true, lastName: true, name: true } },
@@ -84,35 +131,47 @@ export class MatchingService {
         const nearby: NearbyCaregiver[] = [];
 
         for (const cg of caregivers) {
-            if (cg.locationLat == null || cg.locationLng == null) continue;
+            let distanceKm: number | null = null;
 
-            const distanceKm = this.haversineDistance(
-                serviceLat, serviceLng,
-                cg.locationLat, cg.locationLng,
-            );
+            if (!isVirtual) {
+                if (cg.locationLat == null || cg.locationLng == null) continue;
 
-            if (distanceKm <= SERVICE_RADIUS_KM) {
-                // Optional: filter by specialty match
-                if (serviceType && cg.specialties.length > 0) {
-                    if (!cg.specialties.includes(serviceType)) continue;
-                }
+                distanceKm = this.haversineDistance(
+                    serviceLat, serviceLng,
+                    cg.locationLat, cg.locationLng,
+                );
 
-                nearby.push({
-                    id: cg.id,
-                    userId: cg.userId,
-                    email: cg.user.email,
-                    name: cg.user.name || `${cg.user.firstName || ''} ${cg.user.lastName || ''}`.trim() || 'Cuidador',
-                    distance: Math.round(distanceKm * 10) / 10, // 1 decimal
-                    specialties: cg.specialties,
-                    rating: cg.rating,
-                });
+                if (distanceKm > SERVICE_RADIUS_KM) continue;
             }
+
+            // Filtro de especialidad: si hay filtro Y el cuidador declara
+            // especialidades, tiene que incluir la buscada. Si no declara
+            // ninguna, pasa (no lo excluimos por silencio).
+            if (specialtyFilter && cg.specialties.length > 0) {
+                if (!cg.specialties.includes(specialtyFilter)) continue;
+            }
+
+            nearby.push({
+                id: cg.id,
+                userId: cg.userId,
+                email: cg.user.email,
+                name: cg.user.name || `${cg.user.firstName || ''} ${cg.user.lastName || ''}`.trim() || 'Cuidador',
+                distance: distanceKm == null ? null : Math.round(distanceKm * 10) / 10,
+                specialties: cg.specialties,
+                rating: cg.rating,
+            });
         }
 
-        // Sort by distance (nearest first)
-        nearby.sort((a, b) => a.distance - b.distance);
+        // Orden: presencial por distancia asc, virtual por rating desc.
+        if (isVirtual) {
+            nearby.sort((a, b) => b.rating - a.rating);
+        } else {
+            nearby.sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0));
+        }
 
-        this.logger.log(`Found ${nearby.length} nearby caregivers for location (${serviceLat}, ${serviceLng})`);
+        this.logger.log(
+            `Found ${nearby.length} candidates (modality=${isVirtual ? 'virtual' : 'in_person'}, specialty=${specialtyFilter ?? '—'})`,
+        );
         return nearby;
     }
 
@@ -134,15 +193,23 @@ export class MatchingService {
             return { notified: 0 };
         }
 
-        if (service.locationLat == null || service.locationLng == null) {
-            this.logger.warn(`Service ${serviceId} has no location`);
+        const isVirtual = service.modality === 'virtual';
+
+        // Presencial requiere coordenadas para poder filtrar por radio.
+        // Virtual no — las coordenadas son opcionales.
+        if (!isVirtual && (service.locationLat == null || service.locationLng == null)) {
+            this.logger.warn(`Service ${serviceId} (in_person) has no location`);
             return { notified: 0 };
         }
 
         const nearbyCaregivers = await this.findNearbyCaregivers(
-            service.locationLat,
-            service.locationLng,
-            service.serviceType,
+            service.locationLat ?? 0,
+            service.locationLng ?? 0,
+            {
+                modality: isVirtual ? 'virtual' : 'in_person',
+                specialty: service.specialty ?? undefined,
+                serviceType: service.serviceType,
+            },
         );
 
         if (nearbyCaregivers.length === 0) {
@@ -198,10 +265,14 @@ export class MatchingService {
 
             // Push notification (always — works when app is closed). Enqueued
             // so a transient FCM outage retries in the background.
+            const pushTitle = isVirtual ? '🔔 Nuevo servicio virtual' : '🔔 Nuevo servicio cerca';
+            const pushBody = isVirtual
+                ? serviceTypeName
+                : `${serviceTypeName} - ${(cg.distance ?? 0).toFixed(1)} km`;
             this.queueService.enqueuePush(
                 cg.userId,
-                '🔔 Nuevo servicio cerca',
-                `${serviceTypeName} - ${cg.distance.toFixed(1)} km`,
+                pushTitle,
+                pushBody,
                 { type: 'new-service-nearby', serviceId: service.id },
             ).catch(e => this.logger.error('Enqueue push failed for caregiver', e));
 
@@ -214,7 +285,11 @@ export class MatchingService {
                         {
                             serviceType: serviceTypeName,
                             patientName: service.patientName || 'No especificado',
-                            distance: cg.distance,
+                            // Para virtual pasamos 0 — el template igual ignora la
+                            // distancia cuando el servicio no es local. Si en
+                            // algún momento el mail se diferencia por modalidad,
+                            // extender el DTO del MailService.
+                            distance: cg.distance ?? 0,
                             scheduledDate: service.scheduledDate,
                             serviceId: service.id,
                         },
@@ -225,7 +300,8 @@ export class MatchingService {
                 }
             }
 
-            // Create notification record
+            // Create notification record. `distance` es nullable en schema:
+            // queda null cuando el servicio es virtual.
             await this.prisma.serviceNotification.create({
                 data: {
                     serviceId: service.id,

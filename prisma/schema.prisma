@@ -180,6 +180,19 @@ model Service {
   actualEnd      DateTime?
   notes          String?
 
+  // ─── Modality & recurrence (virtual services, 2026-04) ─────────────
+  // `in_person`  → geographic matching applies (SERVICE_RADIUS_KM = 30).
+  // `virtual`    → radio se ignora; video corre sobre infra de medixalink.
+  modality         String    @default("in_person") // in_person | virtual
+  // Especialidad buscada del cuidador (ver common/specialties.ts para la lista
+  // cerrada permitida). Distinto de `serviceType`: serviceType describe la
+  // actividad del servicio, specialty describe el perfil profesional buscado.
+  specialty        String?
+  // Solo para virtuales: cuántas sesiones por semana se pactan y en qué slots.
+  sessionsPerWeek  Int?
+  // Array de { dayOfWeek: 0-6, startTime: "HH:MM", durationMin: number }.
+  preferredSlots   Json[]
+
   // Service location (where the service is performed, e.g. hospital, patient home)
   serviceAddress     String?
   serviceLocationLat Float?
@@ -208,6 +221,7 @@ model Service {
   chats                Chat[]
   reviews              Review[]
   serviceNotifications ServiceNotification[]
+  videoSessions        VideoSession[]
 }
 
 model Chat {
@@ -255,7 +269,8 @@ model ServiceNotification {
   serviceId   String    @db.ObjectId
   caregiverId String    @db.ObjectId
   status      String    @default("pending") // pending | accepted | declined | expired
-  distance    Float     // km from service location
+  // Km from service location. Null para servicios virtuales (sin filtro geográfico).
+  distance    Float?
   notifiedVia String    // websocket | email | both
   readAt      DateTime?
   respondedAt DateTime?
@@ -263,6 +278,44 @@ model ServiceNotification {
 
   service   Service   @relation(fields: [serviceId], references: [id])
   caregiver Caregiver @relation(fields: [caregiverId], references: [id])
+}
+
+// ─── Video Sessions ────────────────────────────────────
+// Materialización de cada turno de un servicio virtual. Un `Service` con
+// `modality = "virtual"` + `sessionsPerWeek` + `preferredSlots` genera N
+// `VideoSession` al ser aceptado por un cuidador.
+//
+// El room name del token Jitsi se construye como `cho-<VideoSession.id>` del
+// lado de medixalink auth-service (ver /tools/telemedicine/partner-token).
+// Cho no almacena el JWT — se solicita fresh a medixalink al momento de unirse.
+model VideoSession {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  serviceId       String    @db.ObjectId
+  familyId        String    @db.ObjectId
+  caregiverId     String    @db.ObjectId
+  // Inicio y fin pactados para esta sesión puntual.
+  startAt         DateTime
+  endAt           DateTime
+  // scheduled  → creada, aún no llega el momento.
+  // ready      → en ventana de 15 min previos al startAt; puede unirse.
+  // in_progress→ al menos un participante entró.
+  // completed  → terminó normalmente (o pasó su ventana).
+  // cancelled  → cancelada por alguna de las partes.
+  status          String    @default("scheduled")
+  cancelledBy     String?   // family | caregiver | system
+  cancelledReason String?
+  // Timestamps de entrada a la sala (informativos, no bloquean nada).
+  familyJoinedAt    DateTime?
+  caregiverJoinedAt DateTime?
+  // Timestamps de recordatorios enviados, para evitar duplicados si el cron
+  // re-ejecuta.
+  remindedAt24h   DateTime?
+  remindedAt15m   DateTime?
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  service   Service @relation(fields: [serviceId], references: [id])
 }
 
 // ─── CMS Models ─────────────────────────────────────────

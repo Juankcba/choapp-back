@@ -190,4 +190,97 @@ describe('MatchingService.findNearbyCaregivers', () => {
         expect(ids).toContain('no-specs'); // caregivers without specialties pass through
         expect(ids).not.toContain('no-match');
     });
+
+    describe('virtual modality', () => {
+        it('ignores the 30 km filter and returns caregivers beyond it', async () => {
+            caregiversData = [
+                makeCaregiver({
+                    id: 'far',
+                    userId: 'u-far',
+                    // 500 km — imposible de considerar en presencial, ok en virtual.
+                    locationLat: BA_LAT + latOffsetKm(500),
+                    locationLng: BA_LNG,
+                    specialties: ['psychology'],
+                    rating: 4.8,
+                }),
+            ];
+
+            const result = await service.findNearbyCaregivers(BA_LAT, BA_LNG, {
+                modality: 'virtual',
+                specialty: 'psychology',
+            });
+            expect(result).toHaveLength(1);
+            expect(result[0].id).toBe('far');
+            expect(result[0].distance).toBeNull();
+        });
+
+        it('accepts caregivers without location (virtual does not require coords)', async () => {
+            caregiversData = [
+                makeCaregiver({
+                    id: 'no-loc',
+                    userId: 'u-no-loc',
+                    locationLat: null,
+                    locationLng: null,
+                    specialties: ['psychology'],
+                }),
+            ];
+
+            const result = await service.findNearbyCaregivers(BA_LAT, BA_LNG, {
+                modality: 'virtual',
+                specialty: 'psychology',
+            });
+            expect(result).toHaveLength(1);
+            expect(result[0].id).toBe('no-loc');
+        });
+
+        it('still filters by specialty in virtual mode', async () => {
+            caregiversData = [
+                makeCaregiver({
+                    id: 'psych',
+                    userId: 'u-psych',
+                    specialties: ['psychology'],
+                }),
+                makeCaregiver({
+                    id: 'kine',
+                    userId: 'u-kine',
+                    specialties: ['physical_therapy'],
+                }),
+            ];
+
+            const result = await service.findNearbyCaregivers(BA_LAT, BA_LNG, {
+                modality: 'virtual',
+                specialty: 'psychology',
+            });
+            expect(result.map(r => r.id)).toEqual(['psych']);
+        });
+
+        it('sorts virtual results by rating desc (not by distance)', async () => {
+            caregiversData = [
+                makeCaregiver({
+                    id: 'low',
+                    userId: 'u-low',
+                    specialties: ['psychology'],
+                    rating: 3.2,
+                }),
+                makeCaregiver({
+                    id: 'high',
+                    userId: 'u-high',
+                    specialties: ['psychology'],
+                    rating: 4.9,
+                }),
+                makeCaregiver({
+                    id: 'mid',
+                    userId: 'u-mid',
+                    specialties: ['psychology'],
+                    rating: 4.1,
+                }),
+            ];
+
+            const result = await service.findNearbyCaregivers(BA_LAT, BA_LNG, {
+                modality: 'virtual',
+                specialty: 'psychology',
+            });
+            expect(result.map(r => r.id)).toEqual(['high', 'mid', 'low']);
+        });
+    });
 });

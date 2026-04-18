@@ -21,6 +21,8 @@ import { VerificationModule } from './verification/verification.module';
 import { TelegramModule } from './telegram/telegram.module';
 import { TestersModule } from './testers/testers.module';
 import { QueueModule } from './queue/queue.module';
+import { MedixalinkModule } from './medixalink/medixalink.module';
+import { VideoSessionsModule } from './video-sessions/video-sessions.module';
 
 @Module({
   imports: [
@@ -46,6 +48,8 @@ import { QueueModule } from './queue/queue.module';
     PressModule,
     VerificationModule,
     TestersModule,
+    MedixalinkModule,
+    VideoSessionsModule,
   ],
 })
 export class AppModule { }
