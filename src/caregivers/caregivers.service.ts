@@ -67,7 +67,14 @@ export class CaregiversService {
         // Fetch user separately (referential integrity isn't guaranteed in Mongo)
         const user = await this.prisma.user.findUnique({
             where: { id: caregiver.userId },
-            select: { firstName: true, lastName: true, name: true, image: true, isTestAccount: true },
+            select: {
+                firstName: true,
+                lastName: true,
+                name: true,
+                image: true,
+                isTestAccount: true,
+                identityStatus: true,
+            },
         });
         if (!user || user.isTestAccount) throw new NotFoundException('Caregiver not found');
 
@@ -108,6 +115,10 @@ export class CaregiversService {
             totalReviews: caregiver.totalReviews,
             totalServices: caregiver.totalServices,
             verificationStatus: caregiver.verificationStatus,
+            // Admin approved the caregiver
+            verifiedByCho: caregiver.verificationStatus === 'verified',
+            // Caregiver completed KYC (DNI) via Didit
+            dniVerified: user.identityStatus === 'verified',
             certifications: caregiver.certifications || [],
             reviews: reviews.map((r) => ({
                 id: r.id,
