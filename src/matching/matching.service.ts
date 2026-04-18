@@ -228,26 +228,11 @@ export class MatchingService {
             const existing = await this.prisma.serviceNotification.findFirst({
                 where: { serviceId: service.id, caregiverId: cg.id },
             });
-            if (existing) {
-                // If caregiver is now online and notification is still pending, re-emit WebSocket
-                if (existing.status === 'pending' && this.matchingGateway.isOnline(cg.userId)) {
-                    this.matchingGateway.emitToCaregiver(cg.userId, 'new-service-nearby', {
-                        serviceId: service.id,
-                        serviceType: serviceTypeName,
-                        patientName: service.patientName || 'No especificado',
-                        familyName,
-                        distance: cg.distance,
-                        scheduledDate: service.scheduledDate,
-                        duration: service.duration,
-                    });
-                }
-                continue;
-            }
-
-            const isOnline = this.matchingGateway.isOnline(cg.userId);
-            let notifiedVia = 'email';
-
-            const notificationPayload = {
+            // Payload común para WS. El banner del cuidador decide cómo
+            // renderizarlo según modality: presencial muestra distancia +
+            // fecha + horas; virtual oculta distancia y muestra frecuencia
+            // + especialidad como info clave.
+            const commonPayload = {
                 serviceId: service.id,
                 serviceType: serviceTypeName,
                 patientName: service.patientName || 'No especificado',
@@ -255,7 +240,23 @@ export class MatchingService {
                 distance: cg.distance,
                 scheduledDate: service.scheduledDate,
                 duration: service.duration,
+                modality: service.modality,
+                specialty: service.specialty,
+                sessionsPerWeek: service.sessionsPerWeek,
             };
+
+            if (existing) {
+                // If caregiver is now online and notification is still pending, re-emit WebSocket
+                if (existing.status === 'pending' && this.matchingGateway.isOnline(cg.userId)) {
+                    this.matchingGateway.emitToCaregiver(cg.userId, 'new-service-nearby', commonPayload);
+                }
+                continue;
+            }
+
+            const isOnline = this.matchingGateway.isOnline(cg.userId);
+            let notifiedVia = 'email';
+
+            const notificationPayload = commonPayload;
 
             // WebSocket notification for online caregivers
             if (isOnline) {
