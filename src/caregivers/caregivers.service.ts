@@ -142,22 +142,22 @@ export class CaregiversService {
     }
 
     async getPublicStats() {
-        // Count caregivers with DNI verified (via Didit) that aren't test accounts.
-        // Admin approval (verificationStatus) is NOT required here — those are
-        // stricter gates used only for sitemap indexing and the "verified by CHO"
-        // badge on individual profiles.
-        const publicCaregivers = await this.prisma.caregiver.findMany({
-            where: {
-                user: { identityStatus: 'verified', isTestAccount: { not: true } },
-            },
-            select: { id: true },
+        // All non-test caregivers (includes anyone with a profile, DNI-verified or not)
+        const allPublic = await this.prisma.caregiver.findMany({
+            where: { user: { isTestAccount: { not: true } } },
+            select: { id: true, user: { select: { identityStatus: true } } },
         });
-        const publicCaregiverIds = publicCaregivers.map((c) => c.id);
 
+        const totalCaregivers = allPublic.length;
+        const verifiedCaregivers = allPublic.filter(
+            (c) => c.user.identityStatus === 'verified',
+        ).length;
+
+        const allIds = allPublic.map((c) => c.id);
         const reviewAgg = await this.prisma.review.aggregate({
             where: {
                 reviewType: 'family_to_caregiver',
-                caregiverId: { in: publicCaregiverIds },
+                caregiverId: { in: allIds },
             },
             _avg: { rating: true },
             _count: { rating: true },
@@ -167,7 +167,8 @@ export class CaregiversService {
         const totalReviews = reviewAgg._count.rating ?? 0;
 
         return {
-            verifiedCaregivers: publicCaregiverIds.length,
+            totalCaregivers,
+            verifiedCaregivers,
             averageRating: Math.round(avg * 10) / 10,
             totalReviews,
         };
@@ -176,9 +177,12 @@ export class CaregiversService {
     async getPublicSearch(provinceSlug?: string | null) {
         const province = findProvince(provinceSlug);
 
+        // Loose filter: any non-test caregiver with valid coords shows up on the
+        // map. The card badge differentiates DNI-verified vs admin-approved vs
+        // unverified so the visitor knows what they're looking at.
         const caregivers = await this.prisma.caregiver.findMany({
             where: {
-                user: { identityStatus: 'verified', isTestAccount: { not: true } },
+                user: { isTestAccount: { not: true } },
             },
             select: {
                 id: true,
@@ -192,7 +196,15 @@ export class CaregiversService {
                 verificationStatus: true,
                 locationLat: true,
                 locationLng: true,
-                user: { select: { firstName: true, lastName: true, name: true, image: true } },
+                user: {
+                    select: {
+                        firstName: true,
+                        lastName: true,
+                        name: true,
+                        image: true,
+                        identityStatus: true,
+                    },
+                },
             },
         });
 
@@ -215,6 +227,8 @@ export class CaregiversService {
                     totalServices: c.totalServices,
                     // true only when admin has explicitly approved this caregiver
                     verifiedByCho: c.verificationStatus === 'verified',
+                    // true when the caregiver's identity has been validated via Didit
+                    dniVerified: c.user.identityStatus === 'verified',
                     lat,
                     lng,
                 };
