@@ -1,10 +1,12 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MatchingService } from '../matching/matching.service';
 import { MatchingGateway } from '../matching/matching.gateway';
 import { MailService } from '../mail/mail.service';
 import { UsersService } from '../users/users.service';
 import { QueueService } from '../queue/queue.service';
+import { VideoSessionsService } from '../video-sessions/video-sessions.service';
+import { isSpecialty } from '../common/specialties';
 
 @Injectable()
 export class ServicesService {
@@ -17,16 +19,49 @@ export class ServicesService {
         private mailService: MailService,
         private usersService: UsersService,
         private queueService: QueueService,
+        private videoSessionsService: VideoSessionsService,
     ) { }
 
     async create(userId: string, data: any) {
         const family = await this.prisma.family.findUnique({ where: { userId } });
         if (!family) throw new NotFoundException('Family profile not found');
 
+        const modality = data.modality === 'virtual' ? 'virtual' : 'in_person';
+
+        // Validar payload específico de virtual si corresponde.
+        if (modality === 'virtual') {
+            if (!data.specialty || !isSpecialty(data.specialty)) {
+                throw new BadRequestException(
+                    'Un servicio virtual requiere una especialidad válida (ver catálogo)',
+                );
+            }
+            if (!data.sessionsPerWeek || data.sessionsPerWeek < 1) {
+                throw new BadRequestException('sessionsPerWeek requerido para servicios virtuales');
+            }
+            if (!Array.isArray(data.preferredSlots) || data.preferredSlots.length === 0) {
+                throw new BadRequestException(
+                    'preferredSlots requerido para servicios virtuales (al menos un slot semanal)',
+                );
+            }
+            for (const slot of data.preferredSlots) {
+                if (
+                    typeof slot?.dayOfWeek !== 'number' || slot.dayOfWeek < 0 || slot.dayOfWeek > 6 ||
+                    typeof slot?.startTime !== 'string' || !/^\d{2}:\d{2}$/.test(slot.startTime) ||
+                    typeof slot?.durationMin !== 'number' || slot.durationMin < 15 || slot.durationMin > 240
+                ) {
+                    throw new BadRequestException('preferredSlots mal formado');
+                }
+            }
+        }
+
         const service = await this.prisma.service.create({
             data: {
                 familyId: family.id,
+                modality,
                 serviceType: data.serviceType,
+                specialty: data.specialty ?? null,
+                sessionsPerWeek: modality === 'virtual' ? data.sessionsPerWeek : null,
+                preferredSlots: modality === 'virtual' ? data.preferredSlots : [],
                 patientName: data.patientName,
                 patientAge: data.patientAge,
                 patientCondition: data.patientCondition,
@@ -34,11 +69,18 @@ export class ServicesService {
                 scheduledDate: data.scheduledDate ? new Date(data.scheduledDate) : null,
                 duration: data.duration,
                 notes: data.notes,
-                serviceAddress: data.serviceAddress,
-                serviceLocationLat: data.serviceLocationLat,
-                serviceLocationLng: data.serviceLocationLng,
-                locationLat: data.serviceLocationLat || data.locationLat || family.locationLat,
-                locationLng: data.serviceLocationLng || data.locationLng || family.locationLng,
+                // Dirección física: solo tiene sentido en presencial. En virtual
+                // dejamos todo null — el matching no los usa y el UI no debería
+                // pedirlos.
+                serviceAddress: modality === 'virtual' ? null : data.serviceAddress,
+                serviceLocationLat: modality === 'virtual' ? null : data.serviceLocationLat,
+                serviceLocationLng: modality === 'virtual' ? null : data.serviceLocationLng,
+                locationLat: modality === 'virtual'
+                    ? null
+                    : (data.serviceLocationLat || data.locationLat || family.locationLat),
+                locationLng: modality === 'virtual'
+                    ? null
+                    : (data.serviceLocationLng || data.locationLng || family.locationLng),
             },
         });
 
@@ -198,7 +240,23 @@ export class ServicesService {
         if (service.familyId !== family.id) throw new NotFoundException('Service not found');
         if (service.status !== 'matched') throw new Error('Service is not in matched state');
 
-        return this.matchingService.selectCaregiver(serviceId, caregiverId);
+        const result = await this.matchingService.selectCaregiver(serviceId, caregiverId);
+
+        // Encadenamiento para servicios virtuales: al aceptar cuidador
+        // materializamos el paquete (4 semanas por defecto). Idempotente, si
+        // falla no bloqueamos la selección — se puede reintentar manualmente
+        // desde el endpoint `/video-sessions/materialize/:serviceId`.
+        if (service.modality === 'virtual') {
+            this.videoSessionsService.materializeForService(serviceId, { weeks: 4 })
+                .then(r => this.logger.log(
+                    `Virtual ${serviceId}: ${r.created} sesiones materializadas (${r.skipped} ya existían)`,
+                ))
+                .catch(err => this.logger.error(
+                    `Virtual materialize failed for ${serviceId}`, err,
+                ));
+        }
+
+        return result;
     }
 
     async getNotificationsForCaregiver(userId: string) {
