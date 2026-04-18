@@ -46,6 +46,21 @@ export class VideoSessionsController {
     }
 
     /**
+     * GET /video-sessions/by-service/:serviceId
+     *
+     * Lista TODAS las sesiones del paquete de un Service puntual. Requiere
+     * que el usuario sea la familia o el cuidador asignado.
+     */
+    @Get('by-service/:serviceId')
+    @Roles('family', 'caregiver')
+    async byService(
+        @Param('serviceId') serviceId: string,
+        @Req() req: any,
+    ) {
+        return this.service.listForService(serviceId, req.user.userId);
+    }
+
+    /**
      * GET /video-sessions/:id/join
      *
      * Devuelve `{ roomName, videoDomain, token, role, ... }` para abrir el

@@ -260,6 +260,36 @@ export class VideoSessionsService {
         });
     }
 
+    /**
+     * Lista todas las VideoSessions de un Service puntual. Exige que el
+     * usuario sea la familia o el cuidador del service; de lo contrario
+     * lanza Forbidden. No filtra por ventana temporal — devuelve el paquete
+     * completo (materializado), útil para la pantalla de detalle.
+     */
+    async listForService(serviceId: string, userId: string) {
+        const service = await this.prisma.service.findUnique({
+            where: { id: serviceId },
+            select: { id: true, familyId: true, caregiverId: true },
+        });
+        if (!service) throw new NotFoundException('Service no encontrado');
+
+        const [family, caregiver] = await Promise.all([
+            this.prisma.family.findUnique({ where: { userId } }),
+            this.prisma.caregiver.findUnique({ where: { userId } }),
+        ]);
+
+        const isFamily = family && family.id === service.familyId;
+        const isCaregiver = caregiver && caregiver.id === service.caregiverId;
+        if (!isFamily && !isCaregiver) {
+            throw new ForbiddenException('No sos parte de este servicio');
+        }
+
+        return this.prisma.videoSession.findMany({
+            where: { serviceId },
+            orderBy: { startAt: 'asc' },
+        });
+    }
+
     async cancel(
         videoSessionId: string,
         userId: string,
