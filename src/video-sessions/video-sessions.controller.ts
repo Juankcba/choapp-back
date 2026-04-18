@@ -1,8 +1,10 @@
 import {
+    BadRequestException,
     Body,
     Controller,
     Get,
     Param,
+    Patch,
     Post,
     Query,
     Req,
@@ -81,5 +83,40 @@ export class VideoSessionsController {
         @Body('reason') reason?: string,
     ) {
         return this.service.cancel(id, req.user.userId, reason);
+    }
+
+    /**
+     * PATCH /video-sessions/:id/reschedule
+     *
+     * Solo la familia del servicio puede reagendar. Body:
+     *   { startAt: ISO 8601 string, durationMin?: number }
+     * El backend ya notifica al cuidador via push + websocket; acá solo
+     * validamos el body y delegamos.
+     */
+    @Patch(':id/reschedule')
+    @Roles('family')
+    async reschedule(
+        @Param('id') id: string,
+        @Req() req: any,
+        @Body() body: { startAt?: string; durationMin?: number },
+    ) {
+        if (!body?.startAt) {
+            throw new BadRequestException('startAt es requerido');
+        }
+        const newStartAt = new Date(body.startAt);
+        if (isNaN(newStartAt.getTime())) {
+            throw new BadRequestException('startAt inválido');
+        }
+        if (body.durationMin != null) {
+            if (typeof body.durationMin !== 'number' || body.durationMin < 15 || body.durationMin > 240) {
+                throw new BadRequestException('durationMin fuera de rango (15-240 min)');
+            }
+        }
+        return this.service.reschedule(
+            id,
+            req.user.userId,
+            newStartAt,
+            body.durationMin,
+        );
     }
 }

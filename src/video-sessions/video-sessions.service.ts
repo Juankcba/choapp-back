@@ -7,6 +7,8 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MedixalinkService } from '../medixalink/medixalink.service';
+import { MatchingGateway } from '../matching/matching.gateway';
+import { QueueService } from '../queue/queue.service';
 
 // Slot del paquete recurrente. Formato persistido en Service.preferredSlots.
 interface PreferredSlot {
@@ -27,6 +29,8 @@ export class VideoSessionsService {
     constructor(
         private readonly prisma: PrismaService,
         private readonly medixalink: MedixalinkService,
+        private readonly matchingGateway: MatchingGateway,
+        private readonly queueService: QueueService,
     ) { }
 
     /**
@@ -313,7 +317,7 @@ export class VideoSessionsService {
         else if (caregiver?.userId === userId) cancelledBy = 'caregiver';
         else throw new ForbiddenException('No sos parte de esta sesión');
 
-        return this.prisma.videoSession.update({
+        const updated = await this.prisma.videoSession.update({
             where: { id: session.id },
             data: {
                 status: 'cancelled',
@@ -321,6 +325,125 @@ export class VideoSessionsService {
                 cancelledReason: reason,
             },
         });
+
+        // Notificar a la contraparte. Cuando la familia cancela, el cuidador
+        // tiene que saberlo (bloqueó la hora en su agenda). Lo mismo al revés.
+        const otherUserId = cancelledBy === 'family'
+            ? caregiver?.userId
+            : family?.userId;
+        if (otherUserId) {
+            const startTxt = session.startAt.toLocaleString('es-AR', {
+                timeZone: 'America/Argentina/Buenos_Aires',
+                day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+            });
+            this.matchingGateway.emitToUser(otherUserId, 'video-session-cancelled', {
+                videoSessionId: session.id,
+                serviceId: session.serviceId,
+                startAt: session.startAt.toISOString(),
+                cancelledBy,
+                reason,
+            });
+            this.queueService.enqueuePush(
+                otherUserId,
+                '❌ Sesión cancelada',
+                `La sesión del ${startTxt} fue cancelada${reason ? `: ${reason}` : ''}`,
+                { type: 'video-session-cancelled', videoSessionId: session.id, serviceId: session.serviceId },
+            ).catch(e => this.logger.error('Push cancel failed', e));
+        }
+
+        return updated;
+    }
+
+    /**
+     * Reagenda una VideoSession a un nuevo startAt (y opcionalmente cambia su
+     * duración). Solo la familia del service puede hacerlo — la familia es
+     * dueña del servicio y quien acordó el cambio por chat. El cuidador
+     * recibe push + websocket con la nueva fecha.
+     *
+     * No permite:
+     *  - Mover una sesión al pasado.
+     *  - Reagendar sesiones `completed`, `cancelled` ni `in_progress`.
+     *
+     * Efectos secundarios: resetea los flags de recordatorios (`remindedAt24h`,
+     * `remindedAt15m`) para que el cron los vuelva a disparar con la fecha
+     * nueva.
+     */
+    async reschedule(
+        videoSessionId: string,
+        userId: string,
+        newStartAt: Date,
+        newDurationMin?: number,
+    ) {
+        const session = await this.prisma.videoSession.findUnique({
+            where: { id: videoSessionId },
+        });
+        if (!session) throw new NotFoundException('Sesión no encontrada');
+        if (session.status === 'cancelled') {
+            throw new BadRequestException('La sesión está cancelada');
+        }
+        if (session.status === 'completed') {
+            throw new BadRequestException('La sesión ya terminó');
+        }
+        if (session.status === 'in_progress') {
+            throw new BadRequestException('No se puede reagendar una sesión en curso');
+        }
+        if (newStartAt.getTime() <= Date.now()) {
+            throw new BadRequestException('La nueva fecha tiene que ser en el futuro');
+        }
+
+        const [family, caregiver] = await Promise.all([
+            this.prisma.family.findUnique({ where: { id: session.familyId } }),
+            this.prisma.caregiver.findUnique({ where: { id: session.caregiverId } }),
+        ]);
+        if (family?.userId !== userId) {
+            throw new ForbiddenException('Solo la familia puede reagendar una sesión');
+        }
+
+        // Conservar la duración original si no pasaron una nueva.
+        const currentDurationMs = session.endAt.getTime() - session.startAt.getTime();
+        const currentDurationMin = Math.max(1, Math.round(currentDurationMs / 60_000));
+        const durationMin = newDurationMin ?? currentDurationMin;
+        const newEndAt = new Date(newStartAt.getTime() + durationMin * 60_000);
+
+        const updated = await this.prisma.videoSession.update({
+            where: { id: session.id },
+            data: {
+                startAt: newStartAt,
+                endAt: newEndAt,
+                // Si la sesión estaba `ready` (dentro de la ventana de join),
+                // con la nueva fecha vuelve a `scheduled`.
+                status: 'scheduled',
+                // Reset de flags para que el cron la vuelva a recordar.
+                remindedAt24h: null,
+                remindedAt15m: null,
+            },
+        });
+
+        // Notificar al cuidador — reagendamiento es un cambio fuerte, no
+        // puede perdérselo.
+        if (caregiver?.userId) {
+            const newStartTxt = newStartAt.toLocaleString('es-AR', {
+                timeZone: 'America/Argentina/Buenos_Aires',
+                day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+            });
+            this.matchingGateway.emitToUser(caregiver.userId, 'video-session-rescheduled', {
+                videoSessionId: session.id,
+                serviceId: session.serviceId,
+                startAt: newStartAt.toISOString(),
+                endAt: newEndAt.toISOString(),
+            });
+            this.queueService.enqueuePush(
+                caregiver.userId,
+                '📅 Sesión reagendada',
+                `Nueva fecha: ${newStartTxt}`,
+                { type: 'video-session-rescheduled', videoSessionId: session.id, serviceId: session.serviceId },
+            ).catch(e => this.logger.error('Push reschedule failed', e));
+        }
+
+        this.logger.log(
+            `VideoSession ${session.id} reagendada por familia ${userId} → ${newStartAt.toISOString()}`,
+        );
+        return updated;
     }
 }
 
