@@ -239,6 +239,24 @@ export class AdminController {
         return this.paymentsService.releasePayment(serviceId);
     }
 
+    /**
+     * Lista payouts (semanas o únicos) con info de service/familia/cuidador.
+     * Query param `status`: 'releasable' (default), 'pending', 'released', 'all'.
+     */
+    @Get('payouts')
+    async listPayouts(@Query('status') status?: string) {
+        return this.adminService.listPayouts(status || 'releasable');
+    }
+
+    /**
+     * Libera un payout específico (una semana de un paquete virtual o el único
+     * de un presencial). Delegamos a PaymentsService.
+     */
+    @Post('payouts/:payoutId/release')
+    async releasePayout(@Param('payoutId') payoutId: string) {
+        return this.paymentsService.releasePayout(payoutId);
+    }
+
     @Post('test-email')
     async sendTestEmail(@Body() body: { email: string }) {
         return this.mailService.sendTestEmail(body.email);

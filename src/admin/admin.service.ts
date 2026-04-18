@@ -541,6 +541,98 @@ export class AdminService {
         };
     }
 
+    /**
+     * Lista payouts para el admin panel, con info enriquecida de service /
+     * familia / cuidador para poder mostrar todo sin más roundtrips.
+     *
+     * `status` default = "releasable" (lo que el admin va a liberar ahora).
+     * Pasar "all" para traer todos los estados.
+     */
+    async listPayouts(status: string = 'releasable') {
+        const where = status === 'all'
+            ? {}
+            : { status };
+
+        const payouts = await this.prisma.servicePayout.findMany({
+            where,
+            orderBy: [
+                { releasableAt: 'asc' },
+                { weekIndex: 'asc' },
+            ],
+            include: {
+                service: {
+                    include: {
+                        caregiver: {
+                            include: {
+                                user: {
+                                    select: {
+                                        id: true,
+                                        email: true,
+                                        firstName: true,
+                                        lastName: true,
+                                        name: true,
+                                    },
+                                },
+                            },
+                        },
+                        family: {
+                            include: {
+                                user: {
+                                    select: {
+                                        id: true,
+                                        email: true,
+                                        firstName: true,
+                                        lastName: true,
+                                        name: true,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        return payouts.map(p => ({
+            id: p.id,
+            serviceId: p.serviceId,
+            weekIndex: p.weekIndex,
+            weekStartAt: p.weekStartAt,
+            weekEndAt: p.weekEndAt,
+            amount: p.amount,
+            status: p.status,
+            releasableAt: p.releasableAt,
+            releasedAt: p.releasedAt,
+            createdAt: p.createdAt,
+            service: {
+                id: p.service.id,
+                modality: p.service.modality,
+                status: p.service.status,
+                serviceType: p.service.serviceType,
+                specialty: p.service.specialty,
+                patientName: p.service.patientName,
+            },
+            caregiver: p.service.caregiver
+                ? {
+                    id: p.service.caregiver.id,
+                    userId: p.service.caregiver.userId,
+                    email: p.service.caregiver.user.email,
+                    name: p.service.caregiver.user.name
+                        || `${p.service.caregiver.user.firstName ?? ''} ${p.service.caregiver.user.lastName ?? ''}`.trim()
+                        || 'Cuidador',
+                }
+                : null,
+            family: {
+                id: p.service.family.id,
+                userId: p.service.family.userId,
+                email: p.service.family.user.email,
+                name: p.service.family.user.name
+                    || `${p.service.family.user.firstName ?? ''} ${p.service.family.user.lastName ?? ''}`.trim()
+                    || 'Familia',
+            },
+        }));
+    }
+
     private isValidCoord(lat: number | null | undefined, lng: number | null | undefined): boolean {
         return isValidCoord(lat, lng);
     }
