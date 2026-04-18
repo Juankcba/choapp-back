@@ -158,8 +158,8 @@ export class MailService {
           Bienvenido/a a <strong>CHO</strong>. Estamos encantados de tenerte con nosotros.
         </p>
         <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
-          Tu cuenta ha sido creada exitosamente. Ya puedes comenzar a utilizar nuestra plataforma
-          para conectar con cuidadores profesionales verificados o para ofrecer tus servicios de cuidado.
+          Tu cuenta ha sido creada exitosamente. Ya puedes comenzar a usar CHO
+          para conectarte con cuidadores de tu zona o para ofrecer cuidado a familias.
         </p>
         <div style="margin:24px 0;text-align:center;">
           <a href="${this.getFrontendUrl()}/login"
@@ -405,7 +405,7 @@ export class MailService {
       if (approved) {
         await this.sendEmail(
           email,
-          `✅ ¡Tu cuenta fue aprobada, ${name}!`,
+          `✅ Tu perfil en CHO ya está activo, ${name}`,
           this.accountApprovedTemplate(name, caregiverId),
         );
       } else {
@@ -425,15 +425,16 @@ export class MailService {
     const frontend = this.getFrontendUrl();
     const profileUrl = caregiverId ? `${frontend}/cuidadores/${caregiverId}` : null;
     const whatsappShareText = encodeURIComponent(
-      `¡Hola! Soy cuidador/a profesional en CHO. Si necesitás ayuda con el cuidado de un ser querido, mirá mi perfil:${profileUrl ? ` ${profileUrl}` : ''}`,
+      `¡Hola! Ofrezco cuidado a través de CHO. Si necesitás ayuda con el cuidado de un ser querido, mirá mi perfil:${profileUrl ? ` ${profileUrl}` : ''}`,
     );
     const whatsappShareUrl = profileUrl ? `https://wa.me/?text=${whatsappShareText}` : null;
 
     return this.baseLayout(`
-      <h2 style="margin:0 0 16px;color:#16a34a;font-size:24px;">¡Felicitaciones, ${name}! 🎉</h2>
+      <h2 style="margin:0 0 16px;color:#16a34a;font-size:24px;">¡Listo, ${name}! 🎉</h2>
       <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
-        Tu cuenta de cuidador/a fue <strong>aprobada por el equipo de CHO</strong>. A partir de ahora
-        tu perfil es público y familias que busquen cuidado cerca tuyo pueden encontrarte.
+        Tu perfil de cuidador/a ya está <strong>activo en CHO</strong>. A partir de ahora
+        tu perfil es público y familias que busquen cuidado cerca tuyo pueden encontrarte y contactarte
+        directamente. Vos pactás con ellas la tarifa y las condiciones del servicio.
       </p>
 
       ${profileUrl ? `
@@ -471,7 +472,7 @@ export class MailService {
         <ul style="margin:0;padding-left:20px;color:#1e3a8a;font-size:14px;line-height:1.7;">
           <li>Asegurate de tener tu <strong>ubicación cargada</strong> para que te encontremos.</li>
           <li>Prendé el switch de <strong>Disponible</strong> en tu dashboard cuando quieras recibir solicitudes.</li>
-          <li>Cargá tus <strong>credenciales</strong> para generar más confianza con las familias.</li>
+          <li>Cargá tu <strong>experiencia y formación</strong> para que las familias te conozcan mejor.</li>
         </ul>
       </div>
 

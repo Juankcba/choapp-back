@@ -115,10 +115,14 @@ export class CaregiversService {
             totalReviews: caregiver.totalReviews,
             totalServices: caregiver.totalServices,
             verificationStatus: caregiver.verificationStatus,
-            // Admin approved the caregiver
-            verifiedByCho: caregiver.verificationStatus === 'verified',
-            // Caregiver completed KYC (DNI) via Didit
+            // Caregiver completed KYC (DNI) via Didit. This is what the UI should
+            // surface as "Identidad verificada" — CHO does NOT vouch for their
+            // professional capabilities.
+            identityVerified: user.identityStatus === 'verified',
             dniVerified: user.identityStatus === 'verified',
+            // Deprecated: frontend should read `identityVerified`. Kept for a
+            // deploy window; remove once clients stop consuming it.
+            verifiedByCho: caregiver.verificationStatus === 'verified',
             certifications: caregiver.certifications || [],
             reviews: reviews.map((r) => ({
                 id: r.id,
@@ -166,7 +170,7 @@ export class CaregiversService {
                 reasons.push('Falta validar tu DNI (verificación de identidad)');
             }
             if (caregiver.verificationStatus !== 'verified') {
-                reasons.push('Tu perfil aún no fue aprobado por el equipo de CHO');
+                reasons.push('Todavía tenés que terminar de completar tu perfil (datos, documentación y ubicación)');
             }
             if (!isValidCoord(caregiver.locationLat, caregiver.locationLng)) {
                 reasons.push('Tenés que cargar tu ubicación (coordenadas) en tu perfil');
@@ -288,8 +292,10 @@ export class CaregiversService {
                     rating: c.rating,
                     totalReviews: c.totalReviews,
                     totalServices: c.totalServices,
-                    verifiedByCho: c.verificationStatus === 'verified',
+                    identityVerified: user!.identityStatus === 'verified',
                     dniVerified: user!.identityStatus === 'verified',
+                    // Deprecated: see note in getPublicProfile.
+                    verifiedByCho: c.verificationStatus === 'verified',
                     lat,
                     lng,
                 };
