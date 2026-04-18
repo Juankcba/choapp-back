@@ -85,6 +85,18 @@ export class ServicesController {
         return this.servicesService.respondToService(req.user.userId, id, body.accepted);
     }
 
+    /**
+     * Mark this caregiver's `ServiceNotification.readAt` for the given service.
+     * Called by the mobile app when the caregiver taps the "new service
+     * nearby" push and opens the service detail — surfaces engagement
+     * metrics without blocking the UI.
+     */
+    @Post(':id/notifications/read')
+    @Roles('caregiver')
+    async markNotificationRead(@Req() req: any, @Param('id') id: string) {
+        return this.servicesService.markNotificationRead(req.user.userId, id);
+    }
+
     @Post(':id/select')
     @Roles('family')
     async selectCaregiver(

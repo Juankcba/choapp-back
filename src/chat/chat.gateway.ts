@@ -12,6 +12,7 @@ import { Server, Socket } from 'socket.io';
 import { ChatService } from './chat.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
+import { QueueService } from '../queue/queue.service';
 
 // Preview length for the body of a chat push notification.
 const CHAT_PUSH_PREVIEW_CHARS = 120;
@@ -35,6 +36,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         private readonly chatService: ChatService,
         private readonly prisma: PrismaService,
         private readonly usersService: UsersService,
+        private readonly queueService: QueueService,
     ) { }
 
     handleConnection(client: Socket) {
@@ -162,7 +164,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 ? `${content.slice(0, CHAT_PUSH_PREVIEW_CHARS).trimEnd()}…`
                 : content;
 
-            await this.usersService.sendPushToUser(
+            await this.queueService.enqueuePush(
                 recipientUserId,
                 `💬 ${senderName}`,
                 preview,

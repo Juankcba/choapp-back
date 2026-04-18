@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MatchingGateway } from '../matching/matching.gateway';
 import { UsersService } from '../users/users.service';
 import { TelegramService } from '../telegram/telegram.service';
+import { QueueService } from '../queue/queue.service';
 import { firstValueFrom } from 'rxjs';
 
 @Injectable()
@@ -22,6 +23,7 @@ export class VerificationService {
         private matchingGateway: MatchingGateway,
         private usersService: UsersService,
         private telegramService: TelegramService,
+        private queueService: QueueService,
     ) {
         this.apiKey = this.configService.get<string>('DIDIT_API_KEY') || '';
         this.webhookSecret = this.configService.get<string>('DIDIT_WEBHOOK_SECRET') || '';
@@ -209,19 +211,19 @@ export class VerificationService {
 
         // Push notification
         if (isApproved) {
-            this.usersService.sendPushToUser(
+            this.queueService.enqueuePush(
                 user.id,
                 '✅ Identidad Verificada',
                 '¡Tu identidad fue verificada! Ya podés usar todas las funcionalidades.',
                 { type: 'identity-verified' },
-            ).catch(e => this.logger.error('Push failed for identity verification', e));
+            ).catch(e => this.logger.error('Enqueue push failed for identity verification', e));
         } else if (identityStatus === 'rejected') {
-            this.usersService.sendPushToUser(
+            this.queueService.enqueuePush(
                 user.id,
                 '⚠️ Verificación Rechazada',
                 'Tu verificación de identidad no pudo ser completada. Intentá de nuevo.',
                 { type: 'identity-rejected' },
-            ).catch(e => this.logger.error('Push failed for identity rejection', e));
+            ).catch(e => this.logger.error('Enqueue push failed for identity rejection', e));
         }
 
         return { received: true, status: identityStatus };

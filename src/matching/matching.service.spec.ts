@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { MatchingGateway } from './matching.gateway';
 import { UsersService } from '../users/users.service';
+import { QueueService } from '../queue/queue.service';
 
 // Buenos Aires reference point used to generate fixtures.
 const BA_LAT = -34.6037;
@@ -51,6 +52,7 @@ describe('MatchingService.findNearbyCaregivers', () => {
                 { provide: MailService, useValue: {} },
                 { provide: MatchingGateway, useValue: {} },
                 { provide: UsersService, useValue: {} },
+                { provide: QueueService, useValue: { enqueuePush: jest.fn(), enqueueEmail: jest.fn() } },
             ],
         }).compile();
 

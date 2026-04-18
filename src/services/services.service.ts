@@ -4,6 +4,7 @@ import { MatchingService } from '../matching/matching.service';
 import { MatchingGateway } from '../matching/matching.gateway';
 import { MailService } from '../mail/mail.service';
 import { UsersService } from '../users/users.service';
+import { QueueService } from '../queue/queue.service';
 
 @Injectable()
 export class ServicesService {
@@ -15,6 +16,7 @@ export class ServicesService {
         private matchingGateway: MatchingGateway,
         private mailService: MailService,
         private usersService: UsersService,
+        private queueService: QueueService,
     ) { }
 
     async create(userId: string, data: any) {
@@ -306,12 +308,12 @@ export class ServicesService {
             });
 
             // Push notification
-            this.usersService.sendPushToUser(
+            this.queueService.enqueuePush(
                 familyUserId,
                 '✅ Servicio completado',
                 `${caregiverName} finalizó el servicio de ${serviceTypeName}`,
                 { type: 'service-completed', serviceId },
-            ).catch(e => this.logger.error('Push failed for family (service completed)', e));
+            ).catch(e => this.logger.error('Enqueue push failed for family (service completed)', e));
 
             // Email notification
             if (service.family?.user?.email) {
@@ -338,6 +340,31 @@ export class ServicesService {
             dementia_care: 'Cuidado de Demencia',
         };
         return types[type] || type;
+    }
+
+    /**
+     * Stamps `ServiceNotification.readAt` for the caregiver that just opened
+     * the service detail (typically after tapping the push). Idempotent — only
+     * the first call writes; later opens are a no-op so we keep the first-seen
+     * timestamp for engagement metrics.
+     */
+    async markNotificationRead(userId: string, serviceId: string): Promise<{ updated: boolean }> {
+        const caregiver = await this.prisma.caregiver.findUnique({
+            where: { userId },
+            select: { id: true },
+        });
+        if (!caregiver) return { updated: false };
+
+        const result = await this.prisma.serviceNotification.updateMany({
+            where: {
+                serviceId,
+                caregiverId: caregiver.id,
+                readAt: null,
+            },
+            data: { readAt: new Date() },
+        });
+
+        return { updated: result.count > 0 };
     }
 }
 

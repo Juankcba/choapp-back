@@ -3,6 +3,7 @@ import { ChatGateway } from './chat.gateway';
 import { ChatService } from './chat.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
+import { QueueService } from '../queue/queue.service';
 
 const SERVICE_ID = 'service-1';
 const CAREGIVER_ID = 'caregiver-profile-1';
@@ -24,6 +25,10 @@ function makeServiceDoc() {
 
 describe('ChatGateway.notifyRecipient', () => {
     let gateway: ChatGateway;
+    // `sendPushToUser` historically was the spy. After the QueueService
+    // migration the gateway calls `queueService.enqueuePush`, so the spy is
+    // re-bound to that method but the variable name is preserved to keep the
+    // tests readable.
     let sendPushToUser: jest.Mock;
     let findUnique: jest.Mock;
 
@@ -36,7 +41,8 @@ describe('ChatGateway.notifyRecipient', () => {
                 ChatGateway,
                 { provide: ChatService, useValue: {} },
                 { provide: PrismaService, useValue: { service: { findUnique } } },
-                { provide: UsersService, useValue: { sendPushToUser } },
+                { provide: UsersService, useValue: { sendPushToUser: jest.fn() } },
+                { provide: QueueService, useValue: { enqueuePush: sendPushToUser } },
             ],
         }).compile();
 

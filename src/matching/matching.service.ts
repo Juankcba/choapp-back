@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { MatchingGateway } from './matching.gateway';
 import { UsersService } from '../users/users.service';
+import { QueueService } from '../queue/queue.service';
 import { isActiveCaregiver } from '../common/activation';
 
 // Fixed system-wide matching radius. Caregivers whose stored location is within
@@ -29,6 +30,7 @@ export class MatchingService {
         private mailService: MailService,
         private matchingGateway: MatchingGateway,
         private usersService: UsersService,
+        private queueService: QueueService,
     ) { }
 
     /**
@@ -194,13 +196,14 @@ export class MatchingService {
                 notifiedVia = 'websocket';
             }
 
-            // Push notification (always — works when app is closed)
-            this.usersService.sendPushToUser(
+            // Push notification (always — works when app is closed). Enqueued
+            // so a transient FCM outage retries in the background.
+            this.queueService.enqueuePush(
                 cg.userId,
                 '🔔 Nuevo servicio cerca',
                 `${serviceTypeName} - ${cg.distance.toFixed(1)} km`,
                 { type: 'new-service-nearby', serviceId: service.id },
-            ).catch(e => this.logger.error('Push failed for caregiver', e));
+            ).catch(e => this.logger.error('Enqueue push failed for caregiver', e));
 
             // Email notification (always for offline, also for online as backup)
             if (!isOnline) {
@@ -307,12 +310,12 @@ export class MatchingService {
                 this.logger.log(`Notified family ${familyUserId} about interested caregiver ${caregiverId}`);
 
                 // Push notification to family
-                this.usersService.sendPushToUser(
+                this.queueService.enqueuePush(
                     familyUserId,
                     '💜 Cuidador interesado',
                     `${caregiverName} quiere cuidar a tu familiar`,
                     { type: 'caregiver-interested', serviceId },
-                ).catch(e => this.logger.error('Push failed for family', e));
+                ).catch(e => this.logger.error('Enqueue push failed for family', e));
             }
             this.logger.log(`Caregiver ${caregiverId} interested in service ${serviceId}`);
         } else {
@@ -383,24 +386,24 @@ export class MatchingService {
             }
 
             // Push notification to confirmed caregiver
-            this.usersService.sendPushToUser(
+            this.queueService.enqueuePush(
                 caregiver.userId,
                 '🎉 ¡Te seleccionaron!',
                 'Una familia te eligió para un servicio',
                 { type: 'service-confirmed', serviceId },
-            ).catch(e => this.logger.error('Push failed for confirmed caregiver', e));
+            ).catch(e => this.logger.error('Enqueue push failed for confirmed caregiver', e));
         }
 
         // Notify declined caregivers via WebSocket
         for (const declined of declinedNotifications) {
             this.matchingGateway.emitToUser(declined.caregiver.userId, 'service-declined', { serviceId });
             // Push notification to declined caregivers
-            this.usersService.sendPushToUser(
+            this.queueService.enqueuePush(
                 declined.caregiver.userId,
                 'Servicio asignado',
                 'La familia eligió a otro cuidador para este servicio',
                 { type: 'service-declined', serviceId },
-            ).catch(e => this.logger.error('Push failed for declined caregiver', e));
+            ).catch(e => this.logger.error('Enqueue push failed for declined caregiver', e));
             this.logger.log(`Notified declined caregiver ${declined.caregiverId} for service ${serviceId}`);
         }
 

@@ -1,41 +1,29 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { QueueService } from '../queue/queue.service';
 
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
   private readonly fromEmail: string;
   private readonly fromName = 'CHO - Cuidadores';
-  private readonly emailApiUrl: string;
-  private readonly emailApiSecret: string;
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    private queueService: QueueService,
+  ) {
     this.fromEmail = 'cho.live.app@gmail.com';
-    const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'https://cho.bladelink.company';
-    this.emailApiUrl = `${frontendUrl}/api/send-email`;
-    this.emailApiSecret = this.configService.get<string>('EMAIL_API_SECRET') || 'cho-email-secret-2026';
-    this.logger.log(`✅ Mail service configured (HTTP via ${this.emailApiUrl})`);
+    this.logger.log('✅ Mail service configured (delivery via QueueService)');
   }
 
   /**
-   * Send email via frontend API route (HTTP)
+   * Hand the email off to the QueueService. In Redis mode this returns as
+   * soon as the job is enqueued and the worker retries on transient
+   * failures. In inline mode it still returns immediately but the send (and
+   * its retries) run in the background.
    */
-  private async sendEmail(to: string, subject: string, html: string): Promise<any> {
-    const res = await fetch(this.emailApiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.emailApiSecret}`,
-      },
-      body: JSON.stringify({ to, subject, html }),
-    });
-
-    if (!res.ok) {
-      const err = await res.text();
-      throw new Error(`Email API error ${res.status}: ${err}`);
-    }
-
-    return res.json();
+  private async sendEmail(to: string, subject: string, html: string): Promise<void> {
+    await this.queueService.enqueueEmail(to, subject, html);
   }
 
   async sendWelcomeEmail(email: string, name: string): Promise<void> {

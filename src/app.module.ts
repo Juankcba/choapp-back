@@ -20,6 +20,7 @@ import { PressModule } from './press/press.module';
 import { VerificationModule } from './verification/verification.module';
 import { TelegramModule } from './telegram/telegram.module';
 import { TestersModule } from './testers/testers.module';
+import { QueueModule } from './queue/queue.module';
 
 @Module({
   imports: [
@@ -27,9 +28,10 @@ import { TestersModule } from './testers/testers.module';
     ScheduleModule.forRoot(),
     TelegramModule,
     PrismaModule,
+    UsersModule,
+    QueueModule,
     MailModule,
     AuthModule,
-    UsersModule,
     CaregiversModule,
     FamiliesModule,
     ServicesModule,
