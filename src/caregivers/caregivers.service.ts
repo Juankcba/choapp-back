@@ -142,10 +142,12 @@ export class CaregiversService {
     }
 
     async getPublicStats() {
-        // Only count caregivers that are fully verified AND NOT a test account
+        // Count caregivers with DNI verified (via Didit) that aren't test accounts.
+        // Admin approval (verificationStatus) is NOT required here — those are
+        // stricter gates used only for sitemap indexing and the "verified by CHO"
+        // badge on individual profiles.
         const publicCaregivers = await this.prisma.caregiver.findMany({
             where: {
-                verificationStatus: 'verified',
                 user: { identityStatus: 'verified', isTestAccount: { not: true } },
             },
             select: { id: true },
@@ -176,7 +178,6 @@ export class CaregiversService {
 
         const caregivers = await this.prisma.caregiver.findMany({
             where: {
-                verificationStatus: 'verified',
                 user: { identityStatus: 'verified', isTestAccount: { not: true } },
             },
             select: {
@@ -188,6 +189,7 @@ export class CaregiversService {
                 rating: true,
                 totalReviews: true,
                 totalServices: true,
+                verificationStatus: true,
                 locationLat: true,
                 locationLng: true,
                 user: { select: { firstName: true, lastName: true, name: true, image: true } },
@@ -211,6 +213,8 @@ export class CaregiversService {
                     rating: c.rating,
                     totalReviews: c.totalReviews,
                     totalServices: c.totalServices,
+                    // true only when admin has explicitly approved this caregiver
+                    verifiedByCho: c.verificationStatus === 'verified',
                     lat,
                     lng,
                 };
