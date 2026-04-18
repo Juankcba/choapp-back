@@ -68,6 +68,7 @@ export class TelegramService {
             'service.completed': { emoji: '🏁', title: 'Servicio Completado' },
             'payout.pending_release': { emoji: '💰', title: 'Pago Listo para Liberar' },
             'payout.release_overdue': { emoji: '⏰', title: 'Pago Pendiente (atrasado)' },
+            'service.deleted_by_admin': { emoji: '🗑', title: 'Servicio Eliminado (admin)' },
         };
 
         const config = eventConfig[event] || { emoji: '📋', title: event };

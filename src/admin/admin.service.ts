@@ -542,6 +542,88 @@ export class AdminService {
     }
 
     /**
+     * Borrado en cascada de un Service para limpieza administrativa. Útil
+     * cuando un service virtual queda en estado inconsistente (ej: el dueño
+     * cerró una sesión antes de que materializara bien) y hay que partir
+     * de cero para volver a probar el flujo.
+     *
+     * NO maneja refunds: si el service tiene paymentStatus='retenido', el
+     * controller frontend tiene que advertir al admin antes de disparar.
+     * Acá solo se ejecuta la limpieza a nivel DB.
+     *
+     * Orden importa por integridad referencial (Mongo no la enforza, pero
+     * dejar huérfanos cuesta plata después):
+     *   1. ServicePayout[]   (dependen de Service)
+     *   2. VideoSession[]    (dependen de Service)
+     *   3. ServiceNotification[] (dependen de Service y Caregiver)
+     *   4. Chat[]            (contienen messages embedded)
+     *   5. Review[]          (dependen de Service y User)
+     *   6. Service
+     */
+    async deleteServiceCascade(serviceId: string) {
+        const service = await this.prisma.service.findUnique({
+            where: { id: serviceId },
+            select: {
+                id: true,
+                familyId: true,
+                caregiverId: true,
+                modality: true,
+                status: true,
+                paymentStatus: true,
+                amount: true,
+            },
+        });
+        if (!service) throw new NotFoundException('Service not found');
+
+        // Snapshot previo para el log, por si hace falta auditar después.
+        const snapshot = {
+            serviceId: service.id,
+            modality: service.modality,
+            status: service.status,
+            paymentStatus: service.paymentStatus,
+            amount: service.amount,
+        };
+
+        const [payouts, videoSessions, notifications, chats, reviews] = await this.prisma.$transaction([
+            this.prisma.servicePayout.deleteMany({ where: { serviceId } }),
+            this.prisma.videoSession.deleteMany({ where: { serviceId } }),
+            this.prisma.serviceNotification.deleteMany({ where: { serviceId } }),
+            this.prisma.chat.deleteMany({ where: { serviceId } }),
+            this.prisma.review.deleteMany({ where: { serviceId } }),
+        ]);
+
+        await this.prisma.service.delete({ where: { id: serviceId } });
+
+        this.logger.warn(
+            `Admin cascade delete for service ${serviceId} — ${JSON.stringify(snapshot)} | ` +
+            `payouts=${payouts.count} videoSessions=${videoSessions.count} ` +
+            `notifications=${notifications.count} chats=${chats.count} reviews=${reviews.count}`,
+        );
+
+        // Aviso a Telegram para auditoría. Si hubo plata retenida, dejamos
+        // un rastro porque nadie la recuperó automáticamente.
+        this.telegramService.sendLog('service.deleted_by_admin', {
+            serviceId: service.id,
+            modality: service.modality || 'in_person',
+            status: service.status,
+            paymentStatus: service.paymentStatus,
+            amount: service.amount != null ? `$${service.amount.toLocaleString('es-AR')}` : '—',
+        } as any).catch(() => undefined);
+
+        return {
+            deleted: true,
+            serviceId,
+            counts: {
+                payouts: payouts.count,
+                videoSessions: videoSessions.count,
+                notifications: notifications.count,
+                chats: chats.count,
+                reviews: reviews.count,
+            },
+        };
+    }
+
+    /**
      * Lista payouts para el admin panel, con info enriquecida de service /
      * familia / cuidador para poder mostrar todo sin más roundtrips.
      *

@@ -249,6 +249,20 @@ export class AdminController {
     }
 
     /**
+     * DELETE /admin/services/:id
+     *
+     * Borrado en cascada de un service y todas sus dependencias (payouts,
+     * videoSessions, notifications, chats, reviews). Útil para limpiar un
+     * service virtual que quedó inconsistente durante testing. NO gestiona
+     * refunds — si `paymentStatus` era 'retenido' o 'released', el admin es
+     * responsable de coordinar la devolución fuera de la plataforma.
+     */
+    @Delete('services/:id')
+    async deleteService(@Param('id') id: string) {
+        return this.adminService.deleteServiceCascade(id);
+    }
+
+    /**
      * Libera un payout específico (una semana de un paquete virtual o el único
      * de un presencial). Delegamos a PaymentsService.
      */
