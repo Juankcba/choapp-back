@@ -48,31 +48,58 @@ export class CaregiversService {
     async getPublicProfile(caregiverId: string) {
         const caregiver = await this.prisma.caregiver.findUnique({
             where: { id: caregiverId },
-            include: {
-                user: { select: { firstName: true, lastName: true, name: true, image: true, isTestAccount: true } },
-                reviews: {
-                    where: { reviewType: 'family_to_caregiver' },
-                    orderBy: { createdAt: 'desc' },
-                    take: 10,
-                    select: {
-                        id: true,
-                        rating: true,
-                        comment: true,
-                        createdAt: true,
-                        reviewer: { select: { firstName: true, lastName: true, name: true } },
-                    },
-                },
+            select: {
+                id: true,
+                userId: true,
+                bio: true,
+                specialties: true,
+                experience: true,
+                hourlyRate: true,
+                rating: true,
+                totalReviews: true,
+                totalServices: true,
+                verificationStatus: true,
+                certifications: true,
             },
         });
         if (!caregiver) throw new NotFoundException('Caregiver not found');
-        if (caregiver.user.isTestAccount) throw new NotFoundException('Caregiver not found');
+
+        // Fetch user separately (referential integrity isn't guaranteed in Mongo)
+        const user = await this.prisma.user.findUnique({
+            where: { id: caregiver.userId },
+            select: { firstName: true, lastName: true, name: true, image: true, isTestAccount: true },
+        });
+        if (!user || user.isTestAccount) throw new NotFoundException('Caregiver not found');
+
+        const reviews = await this.prisma.review.findMany({
+            where: { caregiverId, reviewType: 'family_to_caregiver' },
+            orderBy: { createdAt: 'desc' },
+            take: 10,
+            select: {
+                id: true,
+                rating: true,
+                comment: true,
+                createdAt: true,
+                reviewerId: true,
+            },
+        });
+
+        // Join reviewer names (skip any orphaned reviews)
+        const reviewerIds = [...new Set(reviews.map((r) => r.reviewerId))];
+        const reviewers = reviewerIds.length
+            ? await this.prisma.user.findMany({
+                where: { id: { in: reviewerIds } },
+                select: { id: true, firstName: true, lastName: true, name: true },
+            })
+            : [];
+        const reviewerById = new Map(reviewers.map((r) => [r.id, r]));
 
         return {
             id: caregiver.id,
-            firstName: caregiver.user.firstName,
-            lastName: caregiver.user.lastName,
-            name: caregiver.user.name,
-            image: caregiver.user.image,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            name: user.name,
+            image: user.image,
             bio: caregiver.bio,
             specialties: caregiver.specialties,
             experience: caregiver.experience,
@@ -82,7 +109,13 @@ export class CaregiversService {
             totalServices: caregiver.totalServices,
             verificationStatus: caregiver.verificationStatus,
             certifications: caregiver.certifications || [],
-            reviews: caregiver.reviews,
+            reviews: reviews.map((r) => ({
+                id: r.id,
+                rating: r.rating,
+                comment: r.comment,
+                createdAt: r.createdAt,
+                reviewer: reviewerById.get(r.reviewerId) || { firstName: null, lastName: null, name: null },
+            })),
         };
     }
 
@@ -142,21 +175,30 @@ export class CaregiversService {
     }
 
     async getPublicStats() {
-        // Fetch everyone and filter test accounts in JS.
-        // Prisma's `{ not: true }` on Mongo can behave unexpectedly with
-        // documents that don't have the field set yet (pre-migration users).
-        const rows = await this.prisma.caregiver.findMany({
-            select: {
-                id: true,
-                user: { select: { identityStatus: true, isTestAccount: true } },
-            },
+        // MongoDB referential integrity isn't enforced, so some Caregiver rows
+        // can point to a deleted User. Selecting through the relation then
+        // crashes Prisma. Same pattern as admin.service: pre-fetch valid user
+        // IDs and join in JS.
+        const users = await this.prisma.user.findMany({
+            select: { id: true, identityStatus: true, isTestAccount: true },
         });
-        const allPublic = rows.filter((c) => c.user.isTestAccount !== true);
+        const userById = new Map(users.map((u) => [u.id, u]));
+
+        const rows = await this.prisma.caregiver.findMany({
+            where: { userId: { in: users.map((u) => u.id) } },
+            select: { id: true, userId: true },
+        });
+
+        const allPublic = rows.filter((c) => {
+            const u = userById.get(c.userId);
+            return u && u.isTestAccount !== true;
+        });
 
         const totalCaregivers = allPublic.length;
-        const verifiedCaregivers = allPublic.filter(
-            (c) => c.user.identityStatus === 'verified',
-        ).length;
+        const verifiedCaregivers = allPublic.filter((c) => {
+            const u = userById.get(c.userId);
+            return u && u.identityStatus === 'verified';
+        }).length;
 
         const allIds = allPublic.map((c) => c.id);
         const reviewAgg = await this.prisma.review.aggregate({
@@ -182,13 +224,27 @@ export class CaregiversService {
     async getPublicSearch(provinceSlug?: string | null) {
         const province = findProvince(provinceSlug);
 
-        // Loose filter: any non-test caregiver with valid coords shows up on the
-        // map. The card badge differentiates DNI-verified vs admin-approved vs
-        // unverified so the visitor knows what they're looking at.
-        // Test accounts filtered in JS (see getPublicStats for rationale).
-        const caregivers = await this.prisma.caregiver.findMany({
+        // Pre-fetch users separately and join in JS (see getPublicStats — some
+        // caregivers in prod have dangling userId and Prisma crashes trying to
+        // include the required `user` relation).
+        const users = await this.prisma.user.findMany({
             select: {
                 id: true,
+                firstName: true,
+                lastName: true,
+                name: true,
+                image: true,
+                identityStatus: true,
+                isTestAccount: true,
+            },
+        });
+        const userById = new Map(users.map((u) => [u.id, u]));
+
+        const caregivers = await this.prisma.caregiver.findMany({
+            where: { userId: { in: users.map((u) => u.id) } },
+            select: {
+                id: true,
+                userId: true,
                 bio: true,
                 specialties: true,
                 experience: true,
@@ -199,30 +255,21 @@ export class CaregiversService {
                 verificationStatus: true,
                 locationLat: true,
                 locationLng: true,
-                user: {
-                    select: {
-                        firstName: true,
-                        lastName: true,
-                        name: true,
-                        image: true,
-                        identityStatus: true,
-                        isTestAccount: true,
-                    },
-                },
             },
         });
 
         const items = caregivers
-            .filter((c) => c.user.isTestAccount !== true)
-            .filter((c) => isValidCoord(c.locationLat, c.locationLng))
-            .filter((c) => (province ? isInProvince(c.locationLat!, c.locationLng!, province) : true))
-            .map((c) => {
+            .map((c) => ({ c, user: userById.get(c.userId) }))
+            .filter(({ user }) => user && user.isTestAccount !== true)
+            .filter(({ c }) => isValidCoord(c.locationLat, c.locationLng))
+            .filter(({ c }) => (province ? isInProvince(c.locationLat!, c.locationLng!, province) : true))
+            .map(({ c, user }) => {
                 const { lat, lng } = jitterCoord(c.locationLat!, c.locationLng!, c.id, 3000);
                 return {
                     id: c.id,
-                    firstName: c.user.firstName,
-                    name: c.user.name,
-                    image: c.user.image,
+                    firstName: user!.firstName,
+                    name: user!.name,
+                    image: user!.image,
                     bio: c.bio,
                     specialties: c.specialties,
                     experience: c.experience,
@@ -230,10 +277,8 @@ export class CaregiversService {
                     rating: c.rating,
                     totalReviews: c.totalReviews,
                     totalServices: c.totalServices,
-                    // true only when admin has explicitly approved this caregiver
                     verifiedByCho: c.verificationStatus === 'verified',
-                    // true when the caregiver's identity has been validated via Didit
-                    dniVerified: c.user.identityStatus === 'verified',
+                    dniVerified: user!.identityStatus === 'verified',
                     lat,
                     lng,
                 };
