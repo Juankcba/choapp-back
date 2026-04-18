@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Post, Body, Req } from '@nestjs/common';
+import { Controller, Delete, Get, Patch, Post, Body, Req } from '@nestjs/common';
 
 import { UsersService } from './users.service';
 
@@ -26,5 +26,17 @@ export class UsersController {
     ) {
         await this.usersService.addFcmToken(req.user.userId, body.token);
         return { success: true };
+    }
+
+    /**
+     * Request account deletion (Ley 25.326 right to erasure).
+     * Soft-delete: personal data is anonymized immediately and the account
+     * is flagged with `deletedAt`. A cron performs the final purge after
+     * 30 days so invoices and audit trails that the fiscal authority still
+     * requires remain linkable during that window.
+     */
+    @Delete('me')
+    async deleteMe(@Req() req: any) {
+        return this.usersService.requestAccountDeletion(req.user.userId);
     }
 }

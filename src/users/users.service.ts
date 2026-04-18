@@ -51,6 +51,47 @@ export class UsersService {
         return result;
     }
 
+    /**
+     * Soft-delete the user account at the user's request (Ley 25.326 right
+     * to erasure). We anonymize personally identifiable fields immediately
+     * and flag `deletedAt`. A cron job runs the final purge 30 days later.
+     *
+     * The 30-day window exists because the operator (Nahuel monotributo)
+     * needs to keep traceable invoices for fiscal audits and to let the
+     * user change their mind before permanent destruction.
+     */
+    async requestAccountDeletion(userId: string): Promise<{ ok: true; deletedAt: string }> {
+        const user = await this.prisma.user.findUnique({ where: { id: userId } });
+        if (!user) throw new NotFoundException('User not found');
+        if (user.deletedAt) {
+            return { ok: true, deletedAt: user.deletedAt.toISOString() };
+        }
+
+        const now = new Date();
+        const anonymizedEmail = `deleted-${userId}@cho.local`;
+
+        await this.prisma.user.update({
+            where: { id: userId },
+            data: {
+                deletedAt: now,
+                isActive: false,
+                // Anonymize identifying fields so the row is no longer
+                // personally identifiable. Email is replaced with a unique
+                // placeholder to preserve the @unique constraint.
+                email: anonymizedEmail,
+                firstName: null,
+                lastName: null,
+                name: 'Cuenta eliminada',
+                phone: null,
+                image: null,
+                fcmTokens: [],
+            },
+        });
+
+        this.logger.log(`User ${userId} requested account deletion. Soft-delete applied.`);
+        return { ok: true, deletedAt: now.toISOString() };
+    }
+
     async updateProfile(id: string, data: any) {
         const mapped: any = {};
         if (data.firstName !== undefined) mapped.firstName = data.firstName;

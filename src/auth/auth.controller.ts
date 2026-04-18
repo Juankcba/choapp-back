@@ -41,9 +41,18 @@ export class AuthController {
     @Public()
     @Post('social-login')
     async socialLogin(
-        @Body() body: { email: string; name?: string; image?: string },
+        @Body() body: { email: string; name?: string; image?: string; termsAcceptedVersion?: string },
     ) {
         return this.authService.socialLogin(body);
+    }
+
+    @Post('accept-terms')
+    @UseGuards(AuthGuard('jwt'))
+    async acceptTerms(
+        @Req() req: any,
+        @Body() body: { version: string },
+    ) {
+        return this.authService.acceptTerms(req.user.userId, body.version);
     }
 
     @Post('set-role')

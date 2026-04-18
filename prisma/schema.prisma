@@ -83,6 +83,14 @@ model User {
   diditSessionId        String?
   diditVerifiedAt       DateTime?
   lastLogin     DateTime?
+  // Consent to Terms & Privacy. `termsAcceptedVersion` stores the version
+  // string (see TERMS_VERSION). When the operator bumps the version, users
+  // with an older value are prompted to accept again on next login.
+  termsAcceptedAt       DateTime?
+  termsAcceptedVersion  String?
+  // Soft-delete: the user requested account deletion. Auth rejects login
+  // once this is set. A cron job purges personal data 30 days later.
+  deletedAt     DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 

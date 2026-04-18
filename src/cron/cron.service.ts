@@ -267,4 +267,49 @@ export class CronService {
             this.logger.error('Cron: Error in checkUnreadMessages', err);
         }
     }
+
+    /**
+     * Daily at 4am: perform the final hard-delete for user accounts that
+     * have been soft-deleted for more than HARD_DELETE_GRACE_DAYS. We delete
+     * the User row cascade — Mongo does not enforce FK so child docs
+     * (Caregiver, Family, ServiceNotification, Reviews, CriminalRecords)
+     * are removed explicitly in that order to avoid orphans.
+     *
+     * Services and Chats are retained in anonymized form because they
+     * involve the OTHER party and live invoices; deleting them would break
+     * fiscal traceability for the operator (monotributo).
+     */
+    @Cron('0 4 * * *')
+    async purgeSoftDeletedUsers() {
+        const HARD_DELETE_GRACE_DAYS = 30;
+        const cutoff = new Date(Date.now() - HARD_DELETE_GRACE_DAYS * 24 * 60 * 60 * 1000);
+
+        try {
+            const toPurge = await this.prisma.user.findMany({
+                where: { deletedAt: { lt: cutoff } },
+                select: { id: true },
+            });
+            if (toPurge.length === 0) return;
+
+            this.logger.log(`Cron: purging ${toPurge.length} soft-deleted user(s) past grace window`);
+
+            for (const { id } of toPurge) {
+                try {
+                    await this.prisma.$transaction([
+                        this.prisma.serviceNotification.deleteMany({ where: { caregiver: { userId: id } } }),
+                        this.prisma.criminalRecord.deleteMany({ where: { userId: id } }),
+                        this.prisma.review.deleteMany({ where: { reviewerId: id } }),
+                        this.prisma.caregiver.deleteMany({ where: { userId: id } }),
+                        this.prisma.family.deleteMany({ where: { userId: id } }),
+                        this.prisma.passwordReset.deleteMany({ where: { userId: id } }),
+                        this.prisma.user.delete({ where: { id } }),
+                    ]);
+                } catch (err) {
+                    this.logger.error(`Cron: failed to purge user ${id}`, err);
+                }
+            }
+        } catch (err) {
+            this.logger.error('Cron: Error in purgeSoftDeletedUsers', err);
+        }
+    }
 }

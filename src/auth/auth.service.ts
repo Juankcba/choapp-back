@@ -15,6 +15,7 @@ import { MailService } from '../mail/mail.service';
 import { MatchingGateway } from '../matching/matching.gateway';
 import { TelegramService } from '../telegram/telegram.service';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
+import { TERMS_VERSION } from '../common/legal';
 
 @Injectable()
 export class AuthService {
@@ -48,6 +49,8 @@ export class AuthService {
             familyId: user.family?.id || null,
             caregiver: user.caregiver,
             family: user.family,
+            needsTermsAcceptance: user.termsAcceptedVersion !== TERMS_VERSION,
+            termsVersion: TERMS_VERSION,
         };
     }
 
@@ -58,6 +61,16 @@ export class AuthService {
             });
             if (existing) {
                 throw new ConflictException('Email already exists');
+            }
+
+            // Anchor the consent to the version currently published. The
+            // client reports which version it showed to the user; if it's
+            // stale (client is on an old build), we reject and force them
+            // to refresh.
+            if (dto.termsAcceptedVersion !== TERMS_VERSION) {
+                throw new BadRequestException(
+                    `Terms version mismatch (expected ${TERMS_VERSION}, got ${dto.termsAcceptedVersion}). Please refresh the app and accept the latest terms.`,
+                );
             }
 
             const hashedPassword = await bcrypt.hash(dto.password, 10);
@@ -71,6 +84,8 @@ export class AuthService {
                     lastName: dto.lastName,
                     name: `${dto.firstName} ${dto.lastName}`,
                     role: dto.role,
+                    termsAcceptedAt: new Date(),
+                    termsAcceptedVersion: TERMS_VERSION,
                 },
             });
 
@@ -134,6 +149,10 @@ export class AuthService {
             throw new UnauthorizedException('Invalid credentials');
         }
 
+        if (user.deletedAt) {
+            throw new UnauthorizedException('Esta cuenta fue eliminada y ya no puede acceder.');
+        }
+
         await this.prisma.user.update({
             where: { id: user.id },
             data: { lastLogin: new Date() },
@@ -143,10 +162,12 @@ export class AuthService {
         return {
             access_token: this.jwtService.sign(payload),
             user: { id: user.id, email: user.email, role: user.role, name: user.name, identityStatus: user.identityStatus },
+            needsTermsAcceptance: user.termsAcceptedVersion !== TERMS_VERSION,
+            termsVersion: TERMS_VERSION,
         };
     }
 
-    async socialLogin(data: { email: string; name?: string; image?: string }) {
+    async socialLogin(data: { email: string; name?: string; image?: string; termsAcceptedVersion?: string }) {
         // Parse firstName / lastName from Google display name
         const nameParts = (data.name || '').trim().split(/\s+/);
         const firstName = nameParts[0] || '';
@@ -157,7 +178,20 @@ export class AuthService {
             include: { family: true, caregiver: true },
         });
 
+        if (user?.deletedAt) {
+            throw new UnauthorizedException('Esta cuenta fue eliminada y ya no puede acceder.');
+        }
+
         if (!user) {
+            // Social sign-up may not carry a consent version (the Google /
+            // Apple flow doesn't let us gate it). If absent, the user is
+            // prompted to accept the terms the first time they hit a
+            // protected surface — see `needsTermsAcceptance` in the login
+            // response.
+            const acceptedVersion = data.termsAcceptedVersion === TERMS_VERSION
+                ? TERMS_VERSION
+                : null;
+
             user = await this.prisma.user.create({
                 data: {
                     email: data.email,
@@ -166,6 +200,8 @@ export class AuthService {
                     lastName,
                     image: data.image,
                     role: 'pending',
+                    termsAcceptedAt: acceptedVersion ? new Date() : null,
+                    termsAcceptedVersion: acceptedVersion,
                 },
                 include: { family: true, caregiver: true },
             });
@@ -200,7 +236,30 @@ export class AuthService {
         return {
             access_token: this.jwtService.sign(payload),
             user: { id: user.id, email: user.email, role, name: user.name || data.name, identityStatus: user.identityStatus },
+            needsTermsAcceptance: user.termsAcceptedVersion !== TERMS_VERSION,
+            termsVersion: TERMS_VERSION,
         };
+    }
+
+    /**
+     * Record the user's acceptance of the current TERMS_VERSION. Called from
+     * the mobile / web client once the user ticks the acceptance box on the
+     * gate shown when `needsTermsAcceptance` is true.
+     */
+    async acceptTerms(userId: string, version: string) {
+        if (version !== TERMS_VERSION) {
+            throw new BadRequestException(
+                `Terms version mismatch (expected ${TERMS_VERSION}, got ${version}). Please refresh the app.`,
+            );
+        }
+        await this.prisma.user.update({
+            where: { id: userId },
+            data: {
+                termsAcceptedAt: new Date(),
+                termsAcceptedVersion: TERMS_VERSION,
+            },
+        });
+        return { ok: true, termsVersion: TERMS_VERSION };
     }
 
     async setRole(userId: string, role: 'family' | 'caregiver') {

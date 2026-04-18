@@ -6,6 +6,7 @@ import {
     IsOptional,
     IsNumber,
     IsArray,
+    IsNotEmpty,
     ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -49,6 +50,13 @@ export class RegisterDto {
 
     @IsEnum(['family', 'caregiver'])
     role: 'family' | 'caregiver';
+
+    // Consent to Terms & Privacy at sign-up. Required: the client must send
+    // the TERMS_VERSION it is agreeing to, so the stored consent is pinned
+    // to an exact legal text.
+    @IsString()
+    @IsNotEmpty()
+    termsAcceptedVersion: string;
 
     // Family specific
     @IsOptional()
