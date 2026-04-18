@@ -1,8 +1,9 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { MatchingGateway } from '../matching/matching.gateway';
 import { MailService } from '../mail/mail.service';
+import { TelegramService } from '../telegram/telegram.service';
 import { MercadoPagoConfig, Preference, Payment } from 'mercadopago';
 
 @Injectable()
@@ -17,6 +18,7 @@ export class PaymentsService {
         private configService: ConfigService,
         private matchingGateway: MatchingGateway,
         private mailService: MailService,
+        private telegramService: TelegramService,
     ) {
         const accessToken = this.configService.get<string>('MP_ACCESS_TOKEN');
         this.frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'https://cho.bladelink.company';
@@ -115,6 +117,106 @@ export class PaymentsService {
     }
 
     /**
+     * Planifica los payouts de un Service recién pagado.
+     *
+     * - Presencial: un único payout con amount = netAmount, weekIndex=0.
+     * - Virtual: un payout por cada semana-calendario que contenga al menos
+     *   una VideoSession del paquete. El monto se reparte en partes iguales
+     *   entre las semanas detectadas.
+     *
+     * Idempotente: si ya hay payouts para el Service, no hace nada.
+     *
+     * Para servicios virtuales la materialización de VideoSessions corre
+     * antes del checkout (ver VideoSessionsService). Si por algún motivo no
+     * hay sesiones al momento del webhook, cae a un payout único (fallback
+     * seguro: el admin puede liberar todo al finalizar).
+     */
+    async planPayouts(serviceId: string): Promise<number> {
+        const existing = await this.prisma.servicePayout.count({ where: { serviceId } });
+        if (existing > 0) return 0;
+
+        const service = await this.prisma.service.findUnique({ where: { id: serviceId } });
+        if (!service) throw new NotFoundException('Service not found');
+        if (!service.netAmount || service.netAmount <= 0) {
+            this.logger.warn(`Service ${serviceId} has no netAmount; skip payout planning`);
+            return 0;
+        }
+
+        const isVirtual = service.modality === 'virtual';
+
+        if (!isVirtual) {
+            await this.prisma.servicePayout.create({
+                data: {
+                    serviceId,
+                    weekIndex: 0,
+                    amount: service.netAmount,
+                    status: 'pending',
+                },
+            });
+            return 1;
+        }
+
+        const sessions = await this.prisma.videoSession.findMany({
+            where: { serviceId },
+            orderBy: { startAt: 'asc' },
+            select: { startAt: true },
+        });
+        if (sessions.length === 0) {
+            // Fallback: paquete sin sesiones materializadas todavía. Creo un
+            // único payout como en presencial y dejo que admin libere manual.
+            this.logger.warn(`Virtual service ${serviceId} has no VideoSessions; falling back to single payout`);
+            await this.prisma.servicePayout.create({
+                data: {
+                    serviceId,
+                    weekIndex: 0,
+                    amount: service.netAmount,
+                    status: 'pending',
+                },
+            });
+            return 1;
+        }
+
+        // Agrupo sesiones por semana calendar (lunes 00:00 → domingo 23:59:59.999).
+        const weekMap = new Map<string, { weekStartAt: Date; weekEndAt: Date }>();
+        for (const s of sessions) {
+            const weekStart = startOfWeekMonday(s.startAt);
+            const key = weekStart.toISOString();
+            if (!weekMap.has(key)) {
+                const weekEnd = new Date(weekStart);
+                weekEnd.setDate(weekEnd.getDate() + 7);
+                weekEnd.setMilliseconds(weekEnd.getMilliseconds() - 1);
+                weekMap.set(key, { weekStartAt: weekStart, weekEndAt: weekEnd });
+            }
+        }
+
+        const weeks = Array.from(weekMap.values()).sort(
+            (a, b) => a.weekStartAt.getTime() - b.weekStartAt.getTime(),
+        );
+        const perWeek = Math.round((service.netAmount / weeks.length) * 100) / 100;
+        // Ajuste final para que la suma de amounts coincida con netAmount
+        // (evitar errores de centavos por redondeo). El último payout absorbe
+        // el residuo.
+        const residual = Math.round((service.netAmount - perWeek * weeks.length) * 100) / 100;
+
+        for (let i = 0; i < weeks.length; i++) {
+            const isLast = i === weeks.length - 1;
+            await this.prisma.servicePayout.create({
+                data: {
+                    serviceId,
+                    weekIndex: i,
+                    weekStartAt: weeks[i].weekStartAt,
+                    weekEndAt: weeks[i].weekEndAt,
+                    amount: isLast ? perWeek + residual : perWeek,
+                    status: 'pending',
+                },
+            });
+        }
+
+        this.logger.log(`Planificados ${weeks.length} payouts semanales para service virtual ${serviceId}`);
+        return weeks.length;
+    }
+
+    /**
      * Handles MP payment webhook notifications
      */
     async handleWebhook(body: any) {
@@ -145,6 +247,11 @@ export class PaymentsService {
                             caregiver: { include: { user: true } },
                         },
                     });
+
+                    // Planificar payouts (idempotente) — 1 para presencial, N para virtual.
+                    this.planPayouts(serviceId).catch(e =>
+                        this.logger.error(`planPayouts failed for service ${serviceId}`, e),
+                    );
 
                     // Notify both parties via WebSocket
                     if (service.family?.user) {
@@ -188,7 +295,13 @@ export class PaymentsService {
     }
 
     /**
-     * Release payment to caregiver (admin action, after service completion)
+     * Libera todos los payouts liberables (`releasable`) de un Service. Para
+     * presenciales es el único payout. Para virtuales es de 1 a N según
+     * cuántas semanas estén cumplidas.
+     *
+     * Mantiene el endpoint clásico `POST /payments/:serviceId/release` útil
+     * para operar sobre un service entero sin pensar en payouts. Para liberar
+     * una semana específica (virtual) usar `releasePayout(payoutId)`.
      */
     async releasePayment(serviceId: string) {
         const service = await this.prisma.service.findUnique({
@@ -200,41 +313,130 @@ export class PaymentsService {
         });
 
         if (!service) throw new NotFoundException('Service not found');
-        if (service.paymentStatus !== 'retenido') throw new BadRequestException('Payment not in escrow');
-        if (service.status !== 'completed') throw new BadRequestException('Service not completed');
+        if (service.paymentStatus !== 'retenido') {
+            throw new BadRequestException('Payment not in escrow');
+        }
 
-        const updated = await this.prisma.service.update({
-            where: { id: serviceId },
-            data: {
-                paymentStatus: 'released',
-                releasedAt: new Date(),
-            },
+        const releasable = await this.prisma.servicePayout.findMany({
+            where: { serviceId, status: 'releasable' },
+            orderBy: { weekIndex: 'asc' },
         });
+        if (releasable.length === 0) {
+            throw new BadRequestException('No hay payouts liberables para este service');
+        }
 
-        // Notify caregiver
+        let totalReleased = 0;
+        const releasedAt = new Date();
+        for (const payout of releasable) {
+            await this.prisma.servicePayout.update({
+                where: { id: payout.id },
+                data: { status: 'released', releasedAt },
+            });
+            totalReleased += payout.amount;
+        }
+
+        // Si ya no queda ninguno pendiente/releasable, el Service queda como
+        // 'released' a nivel global.
+        const remaining = await this.prisma.servicePayout.count({
+            where: { serviceId, status: { not: 'released' } },
+        });
+        if (remaining === 0) {
+            await this.prisma.service.update({
+                where: { id: serviceId },
+                data: { paymentStatus: 'released', releasedAt },
+            });
+        }
+
+        // Notificar al cuidador
         if (service.caregiver?.user) {
             this.matchingGateway.emitToUser(service.caregiver.userId, 'payment-released', {
                 serviceId,
-                netAmount: service.netAmount,
+                netAmount: totalReleased,
             });
-
-            // Send email
             if (service.caregiver.user.email) {
                 await this.mailService.sendPaymentReleasedEmail(
                     service.caregiver.user.email,
                     service.caregiver.user.firstName || service.caregiver.user.name || 'Cuidador',
-                    service.netAmount || 0,
+                    totalReleased,
                     serviceId,
                 );
             }
         }
 
-        this.logger.log(`Payment released for service ${serviceId}: $${service.netAmount}`);
-
+        this.logger.log(
+            `Released ${releasable.length} payout(s) for service ${serviceId}: $${totalReleased}`,
+        );
         return {
             status: 'released',
-            netAmount: service.netAmount,
-            releasedAt: updated.releasedAt,
+            releasedCount: releasable.length,
+            netAmount: totalReleased,
+            serviceFullyReleased: remaining === 0,
+            releasedAt,
+        };
+    }
+
+    /**
+     * Libera un payout específico (admin). Útil para virtuales donde el admin
+     * libera semana por semana según el aviso de Telegram.
+     */
+    async releasePayout(payoutId: string) {
+        const payout = await this.prisma.servicePayout.findUnique({
+            where: { id: payoutId },
+        });
+        if (!payout) throw new NotFoundException('Payout not found');
+        if (payout.status === 'released') {
+            throw new BadRequestException('Payout ya liberado');
+        }
+        if (payout.status !== 'releasable') {
+            throw new BadRequestException('Payout no está en estado releasable');
+        }
+
+        const releasedAt = new Date();
+        await this.prisma.servicePayout.update({
+            where: { id: payoutId },
+            data: { status: 'released', releasedAt },
+        });
+
+        const service = await this.prisma.service.findUnique({
+            where: { id: payout.serviceId },
+            include: { caregiver: { include: { user: true } } },
+        });
+
+        const remaining = await this.prisma.servicePayout.count({
+            where: { serviceId: payout.serviceId, status: { not: 'released' } },
+        });
+        if (remaining === 0 && service) {
+            await this.prisma.service.update({
+                where: { id: service.id },
+                data: { paymentStatus: 'released', releasedAt },
+            });
+        }
+
+        if (service?.caregiver?.user) {
+            this.matchingGateway.emitToUser(service.caregiver.userId, 'payment-released', {
+                serviceId: service.id,
+                payoutId,
+                weekIndex: payout.weekIndex,
+                amount: payout.amount,
+            });
+            if (service.caregiver.user.email) {
+                this.mailService.sendPaymentReleasedEmail(
+                    service.caregiver.user.email,
+                    service.caregiver.user.firstName || service.caregiver.user.name || 'Cuidador',
+                    payout.amount,
+                    service.id,
+                ).catch(() => undefined);
+            }
+        }
+
+        this.logger.log(
+            `Released payout ${payoutId} (week ${payout.weekIndex}, $${payout.amount}) for service ${payout.serviceId}`,
+        );
+        return {
+            status: 'released',
+            amount: payout.amount,
+            serviceFullyReleased: remaining === 0,
+            releasedAt,
         };
     }
 
@@ -292,6 +494,11 @@ export class PaymentsService {
                         paymentMethod: approvedPayment.payment_method_id || 'mercadopago',
                     },
                 });
+
+                // Planificar payouts (idempotente).
+                this.planPayouts(serviceId).catch(e =>
+                    this.logger.error(`planPayouts failed for service ${serviceId}`, e),
+                );
 
                 this.logger.log(`Payment confirmed via search for service ${serviceId}: MP payment ${approvedPayment.id}`);
 
@@ -427,4 +634,19 @@ export class PaymentsService {
         };
         return types[type] || type;
     }
+}
+
+/**
+ * Devuelve el inicio de la semana (lunes, 00:00:00.000) que contiene `date`.
+ * Se usa para agrupar VideoSessions por semana calendar al planificar payouts.
+ * Calcula en hora local del servidor (Argentina para el caso actual).
+ */
+export function startOfWeekMonday(date: Date): Date {
+    const d = new Date(date);
+    const dow = d.getDay(); // 0=dom, 1=lun, ...
+    // Distancia al lunes anterior.
+    const diff = (dow + 6) % 7;
+    d.setDate(d.getDate() - diff);
+    d.setHours(0, 0, 0, 0);
+    return d;
 }

@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MatchingService } from '../matching/matching.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { MailService } from '../mail/mail.service';
+import { QueueService } from '../queue/queue.service';
 
 const FAMILY_USER_ID = 'user-family';
 const CAREGIVER_USER_ID = 'user-caregiver';
@@ -79,6 +80,7 @@ describe('CronService.checkUnreadMessages', () => {
                 { provide: MatchingService, useValue: {} },
                 { provide: TelegramService, useValue: {} },
                 { provide: MailService, useValue: { sendChatNotificationEmail } },
+                { provide: QueueService, useValue: { enqueuePush: jest.fn(), enqueueEmail: jest.fn() } },
             ],
         }).compile();
 

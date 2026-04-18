@@ -222,6 +222,41 @@ model Service {
   reviews              Review[]
   serviceNotifications ServiceNotification[]
   videoSessions        VideoSession[]
+  payouts              ServicePayout[]
+}
+
+// ─── Service Payouts ───────────────────────────────────
+// Los servicios presenciales generan 1 payout (con amount = netAmount). Los
+// virtuales generan N payouts (uno por semana del paquete) y el admin los
+// libera de a uno cuando se cumplen las sesiones de esa semana. Esto mantiene
+// un audit trail de todas las liberaciones sin romper el flujo existente.
+//
+// Lifecycle: `pending` (sesiones pendientes de ocurrir) → `releasable` (todas
+// las sesiones de la semana están en estado terminal, listo para que el admin
+// libere) → `released` (admin liberó al cuidador vía endpoint).
+model ServicePayout {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  serviceId   String    @db.ObjectId
+  // 0-based. Para presenciales es siempre 0. Para virtuales va 0..weeks-1.
+  weekIndex   Int
+  // Rango de la semana calendar en la que caen las VideoSessions contadas
+  // para liberar este payout. Para presenciales: null (no aplica).
+  weekStartAt DateTime?
+  weekEndAt   DateTime?
+  // Porción del Service.netAmount que corresponde liberar en este payout.
+  amount      Float
+  // pending | releasable | released
+  status       String    @default("pending")
+  // Momento en que el payout pasó a `releasable`. Sirve para el SLA del admin
+  // (cron diario avisa payouts releasable hace >1 día sin liberar).
+  releasableAt DateTime?
+  releasedAt   DateTime?
+  // Para no duplicar avisos a Telegram. Se setea la primera vez que se notifica.
+  notifiedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  service Service @relation(fields: [serviceId], references: [id])
 }
 
 model Chat {

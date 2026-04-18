@@ -28,6 +28,15 @@ export class PaymentsController {
         return this.paymentsService.releasePayment(serviceId);
     }
 
+    // Libera un payout específico (una semana de un paquete virtual, o el
+    // único de un presencial). Útil para el admin cuando Telegram avisa que
+    // hay una semana lista para liberar.
+    @Post('payouts/:payoutId/release')
+    @Roles('admin')
+    async releasePayout(@Param('payoutId') payoutId: string) {
+        return this.paymentsService.releasePayout(payoutId);
+    }
+
     @Get(':serviceId/status')
     async getPaymentStatus(@Param('serviceId') serviceId: string) {
         return this.paymentsService.getPaymentStatus(serviceId);

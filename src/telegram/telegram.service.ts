@@ -65,6 +65,9 @@ export class TelegramService {
             'criminal_record.uploaded': { emoji: '📄', title: 'Antecedente Penal Subido' },
             'criminal_record.expiring': { emoji: '⚠️', title: 'Antecedente Por Vencer' },
             'criminal_record.expired': { emoji: '🚨', title: 'Antecedente VENCIDO' },
+            'service.completed': { emoji: '🏁', title: 'Servicio Completado' },
+            'payout.pending_release': { emoji: '💰', title: 'Pago Listo para Liberar' },
+            'payout.release_overdue': { emoji: '⏰', title: 'Pago Pendiente (atrasado)' },
         };
 
         const config = eventConfig[event] || { emoji: '📋', title: event };
@@ -97,5 +100,14 @@ export class TelegramService {
         device: '📱 Dispositivo',
         source: '🔗 Fuente',
         googleEmail: '📧 Email Google',
+        serviceId: '🧾 Servicio',
+        payoutId: '💵 Payout',
+        modality: '📡 Modalidad',
+        amount: '💰 Monto',
+        caregiver: '🤝 Cuidador',
+        family: '👪 Familia',
+        weekIndex: '📆 Semana',
+        weekRange: '🗓 Rango',
+        daysWaiting: '⏳ Días esperando',
     };
 }

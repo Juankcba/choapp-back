@@ -208,6 +208,23 @@ export class VideoSessionsService {
             });
         }
 
+        // Transicionar el Service a `in_progress` en el primer join de
+        // cualquier participante a cualquier VideoSession del paquete. El
+        // cuidador no tiene que tocar un botón manual como en presencial.
+        const parentService = await this.prisma.service.findUnique({
+            where: { id: session.serviceId },
+            select: { id: true, status: true, actualStart: true },
+        });
+        if (parentService && parentService.status === 'accepted') {
+            await this.prisma.service.update({
+                where: { id: parentService.id },
+                data: {
+                    status: 'inProgress',
+                    actualStart: parentService.actualStart ?? new Date(),
+                },
+            });
+        }
+
         return {
             sessionId: session.id,
             roomName: tokens.roomName,
