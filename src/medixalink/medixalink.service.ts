@@ -33,13 +33,16 @@ export class MedixalinkService {
     constructor(private readonly config: ConfigService) { }
 
     private getAuthUrl(): string {
-        const url = this.config.get<string>('MEDIXALINK_AUTH_URL');
-        if (!url) {
+        const raw = this.config.get<string>('MEDIXALINK_AUTH_URL');
+        if (!raw) {
             throw new InternalServerErrorException(
                 'MEDIXALINK_AUTH_URL no configurado',
             );
         }
-        return url.replace(/\/$/, '');
+        // Sanitiza: si el env var vino sin protocolo (ej: `auth.medixalink.com`),
+        // asumimos https. Sin esto `fetch` tira `Invalid URL`.
+        const trimmed = raw.trim().replace(/\/$/, '');
+        return /^https?:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`;
     }
 
     private getInternalApiKey(): string {
