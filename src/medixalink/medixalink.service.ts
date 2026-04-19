@@ -98,8 +98,14 @@ export class MedixalinkService {
             this.logger.error(
                 `Medixalink respondió ${response.status}: ${text.slice(0, 300)}`,
             );
+            // Mensajes más específicos para debug más rápido en el frontend.
+            if (response.status === 401 || response.status === 403) {
+                throw new InternalServerErrorException(
+                    `Medixalink rechazó la credencial (${response.status}) — revisar MEDIXALINK_INTERNAL_API_KEY`,
+                );
+            }
             throw new InternalServerErrorException(
-                'Medixalink rechazó la solicitud de token',
+                `Medixalink respondió ${response.status} — ${text.slice(0, 100)}`,
             );
         }
 
