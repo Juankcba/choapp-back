@@ -251,7 +251,7 @@ export class VideoSessionsService {
             await this.prisma.service.update({
                 where: { id: parentService.id },
                 data: {
-                    status: 'inProgress',
+                    status: 'in_progress',
                     actualStart: parentService.actualStart ?? new Date(),
                 },
             });
