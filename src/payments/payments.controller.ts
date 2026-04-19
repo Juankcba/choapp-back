@@ -29,6 +29,20 @@ export class PaymentsController {
         );
     }
 
+    // Fallback post-redirect — si el webhook de MP no llegó, el frontend
+    // llama esto al volver del checkout para reconciliar.
+    @Post('video-sessions/:id/confirm')
+    @Roles('family')
+    async confirmVideoSessionPayment(
+        @Param('id') videoSessionId: string,
+        @Req() req: any,
+    ) {
+        return this.paymentsService.confirmVideoSessionPayment(
+            videoSessionId,
+            req.user.userId,
+        );
+    }
+
     @Post('webhook')
     @Public()
     @HttpCode(200)

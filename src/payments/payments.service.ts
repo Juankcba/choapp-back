@@ -333,6 +333,65 @@ export class PaymentsService {
     }
 
     /**
+     * Fallback para reconciliar el pago de una VideoSession cuando el
+     * webhook de MP no llegó a tiempo (o se perdió). Busca en MP por
+     * external_reference = `vs:<videoSessionId>` y, si hay un payment
+     * aprobado, ejecuta la misma lógica que el webhook.
+     *
+     * Idempotente: si ya está marcada como retenido/released, no hace nada.
+     */
+    async confirmVideoSessionPayment(videoSessionId: string, familyUserId: string) {
+        const session = await this.prisma.videoSession.findUnique({
+            where: { id: videoSessionId },
+        });
+        if (!session) throw new NotFoundException('VideoSession no encontrada');
+
+        // Validar ownership
+        const service = await this.prisma.service.findUnique({
+            where: { id: session.serviceId },
+            include: { family: true },
+        });
+        if (!service) throw new NotFoundException('Service not found');
+        if (service.family.userId !== familyUserId) {
+            throw new ForbiddenException('No sos el titular de este servicio');
+        }
+
+        if (session.paymentStatus === 'retenido' || session.paymentStatus === 'released') {
+            return { status: 'already_paid', paymentStatus: session.paymentStatus };
+        }
+
+        try {
+            const response = await fetch(
+                `https://api.mercadopago.com/v1/payments/search?external_reference=${encodeURIComponent('vs:' + videoSessionId)}&sort=date_created&criteria=desc`,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${this.configService.get('MP_ACCESS_TOKEN')}`,
+                    },
+                },
+            );
+            if (!response.ok) {
+                this.logger.warn(`MP search failed: ${response.status}`);
+                return { status: 'search_failed', paymentStatus: session.paymentStatus };
+            }
+            const data = await response.json();
+            const approved = data.results?.find((p: any) => p.status === 'approved');
+            if (!approved) {
+                return { status: 'not_found', paymentStatus: session.paymentStatus };
+            }
+            await this.handleVideoSessionPaymentApproved(
+                videoSessionId,
+                approved.id.toString(),
+                approved.payment_method_id || 'mercadopago',
+                approved.transaction_amount,
+            );
+            return { status: 'confirmed', paymentStatus: 'retenido' };
+        } catch (err) {
+            this.logger.error(`confirmVideoSessionPayment error: ${(err as Error).message}`);
+            return { status: 'error', paymentStatus: session.paymentStatus };
+        }
+    }
+
+    /**
      * Callback del webhook cuando el pago de una VideoSession fue aprobado
      * (scheme `per_session`). Marca la sesión como `retenido`, notifica al
      * cuidador y a la familia (push + websocket), y deja un aviso para el
