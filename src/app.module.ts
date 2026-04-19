@@ -23,11 +23,13 @@ import { TestersModule } from './testers/testers.module';
 import { QueueModule } from './queue/queue.module';
 import { MedixalinkModule } from './medixalink/medixalink.module';
 import { VideoSessionsModule } from './video-sessions/video-sessions.module';
+import { CommonModule } from './common/common.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
+    CommonModule,
     TelegramModule,
     PrismaModule,
     UsersModule,

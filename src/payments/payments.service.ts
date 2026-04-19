@@ -5,6 +5,7 @@ import { MatchingGateway } from '../matching/matching.gateway';
 import { MailService } from '../mail/mail.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { MercadoPagoConfig, Preference, Payment } from 'mercadopago';
+import { FieldEncryptionService } from '../common/field-encryption.service';
 
 @Injectable()
 export class PaymentsService {
@@ -19,6 +20,7 @@ export class PaymentsService {
         private matchingGateway: MatchingGateway,
         private mailService: MailService,
         private telegramService: TelegramService,
+        private encryption: FieldEncryptionService,
     ) {
         const accessToken = this.configService.get<string>('MP_ACCESS_TOKEN');
         this.frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'https://cho.bladelink.company';
@@ -67,7 +69,9 @@ export class PaymentsService {
                 items: [{
                     id: serviceId,
                     title: `Servicio CHO: ${serviceTypes[service.serviceType] || service.serviceType}`,
-                    description: `Cuidado para ${service.patientName || 'paciente'} - ${duration}hs`,
+                    // patientName viene cifrado del DB: descifrar antes de
+                    // mandarlo a MercadoPago (aparece en el checkout del usuario).
+                    description: `Cuidado para ${this.encryption.decrypt(service.patientName) || 'paciente'} - ${duration}hs`,
                     quantity: 1,
                     unit_price: totalAmount,
                     currency_id: 'ARS',

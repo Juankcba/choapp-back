@@ -11,6 +11,7 @@ import {
     effectiveActivationStatus,
     legacyMirrorOf,
 } from '../common/activation';
+import { FieldEncryptionService } from '../common/field-encryption.service';
 
 @Injectable()
 export class AdminService {
@@ -23,6 +24,7 @@ export class AdminService {
         private usersService: UsersService,
         private telegramService: TelegramService,
         private configService: ConfigService,
+        private encryption: FieldEncryptionService,
     ) { }
 
     async getStats() {
@@ -509,7 +511,14 @@ export class AdminService {
             }),
         ]);
 
-        return { recentServices, recentNotifications };
+        // Admin dashboard: descifrar patient* antes de mandarlo al UI.
+        return {
+            recentServices: this.encryption.decryptServiceList(recentServices),
+            recentNotifications: recentNotifications.map((n) => ({
+                ...n,
+                service: this.encryption.decryptServiceFields(n.service as any),
+            })),
+        };
     }
 
     /**
@@ -692,7 +701,7 @@ export class AdminService {
                 status: p.service.status,
                 serviceType: p.service.serviceType,
                 specialty: p.service.specialty,
-                patientName: p.service.patientName,
+                patientName: this.encryption.decrypt(p.service.patientName),
             },
             caregiver: p.service.caregiver
                 ? {
@@ -925,6 +934,8 @@ export class AdminService {
             })
             .map(s => ({
                 ...s,
+                // Descifrar patientName — en map data del admin se muestra como label.
+                patientName: this.encryption.decrypt(s.patientName),
                 lat: s.serviceLocationLat,
                 lng: s.serviceLocationLng,
                 familyUserId: s.family?.user?.id,

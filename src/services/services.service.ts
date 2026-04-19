@@ -7,6 +7,7 @@ import { UsersService } from '../users/users.service';
 import { QueueService } from '../queue/queue.service';
 import { VideoSessionsService } from '../video-sessions/video-sessions.service';
 import { isSpecialty, VIRTUAL_FRIENDLY_SPECIALTIES } from '../common/specialties';
+import { FieldEncryptionService } from '../common/field-encryption.service';
 
 @Injectable()
 export class ServicesService {
@@ -20,6 +21,7 @@ export class ServicesService {
         private usersService: UsersService,
         private queueService: QueueService,
         private videoSessionsService: VideoSessionsService,
+        private encryption: FieldEncryptionService,
     ) { }
 
     async create(userId: string, data: any) {
@@ -76,10 +78,12 @@ export class ServicesService {
                 specialty: data.specialty ?? null,
                 sessionsPerWeek: modality === 'virtual' ? data.sessionsPerWeek : null,
                 preferredSlots: modality === 'virtual' ? data.preferredSlots : [],
-                patientName: data.patientName,
+                // Datos de salud / PII del paciente: cifrados at-rest (AES-256-GCM).
+                // Ver FieldEncryptionService; campos descifrados al leer.
+                patientName: this.encryption.encrypt(data.patientName) ?? null,
                 patientAge: data.patientAge,
-                patientCondition: data.patientCondition,
-                specialNeeds: data.specialNeeds,
+                patientCondition: this.encryption.encrypt(data.patientCondition) ?? null,
+                specialNeeds: this.encryption.encrypt(data.specialNeeds) ?? null,
                 scheduledDate: data.scheduledDate ? new Date(data.scheduledDate) : null,
                 duration: data.duration,
                 notes: data.notes,
@@ -107,14 +111,14 @@ export class ServicesService {
                 this.logger.error(`Matching failed for service ${service.id}`, err);
             });
 
-        return service;
+        return this.encryption.decryptServiceFields(service);
     }
 
     async findByFamily(userId: string) {
         const family = await this.prisma.family.findUnique({ where: { userId } });
         if (!family) throw new NotFoundException('Family profile not found');
 
-        return this.prisma.service.findMany({
+        const services = await this.prisma.service.findMany({
             where: { familyId: family.id },
             include: {
                 caregiver: {
@@ -123,6 +127,7 @@ export class ServicesService {
             },
             orderBy: { createdAt: 'desc' },
         });
+        return this.encryption.decryptServiceList(services);
     }
 
     /**
@@ -132,7 +137,7 @@ export class ServicesService {
         const caregiver = await this.prisma.caregiver.findUnique({ where: { userId } });
         if (!caregiver) throw new NotFoundException('Caregiver not found');
 
-        return this.prisma.service.findMany({
+        const services = await this.prisma.service.findMany({
             where: {
                 caregiverId: caregiver.id,
                 // 'inProgress' (camelCase) se incluye como compat para
@@ -146,6 +151,7 @@ export class ServicesService {
             },
             orderBy: { updatedAt: 'desc' },
         });
+        return this.encryption.decryptServiceList(services);
     }
 
     async findById(id: string) {
@@ -161,7 +167,7 @@ export class ServicesService {
             },
         });
         if (!service) throw new NotFoundException('Service not found');
-        return service;
+        return this.encryption.decryptServiceFields(service);
     }
 
     async update(userId: string, serviceId: string, data: any) {
@@ -173,19 +179,21 @@ export class ServicesService {
         if (service.familyId !== family.id) throw new NotFoundException('Service not found');
         if (service.status !== 'pending') throw new Error('Only pending services can be edited');
 
-        return this.prisma.service.update({
+        const updated = await this.prisma.service.update({
             where: { id: serviceId },
             data: {
                 ...(data.serviceType && { serviceType: data.serviceType }),
-                ...(data.patientName && { patientName: data.patientName }),
+                // Campos sensibles: cifrados al vuelo.
+                ...(data.patientName && { patientName: this.encryption.encrypt(data.patientName) }),
                 ...(data.patientAge != null && { patientAge: data.patientAge }),
-                ...(data.patientCondition && { patientCondition: data.patientCondition }),
-                ...(data.specialNeeds && { specialNeeds: data.specialNeeds }),
+                ...(data.patientCondition && { patientCondition: this.encryption.encrypt(data.patientCondition) }),
+                ...(data.specialNeeds && { specialNeeds: this.encryption.encrypt(data.specialNeeds) }),
                 ...(data.scheduledDate && { scheduledDate: new Date(data.scheduledDate) }),
                 ...(data.duration != null && { duration: data.duration }),
                 ...(data.notes !== undefined && { notes: data.notes }),
             },
         });
+        return this.encryption.decryptServiceFields(updated);
     }
 
     async remove(userId: string, serviceId: string) {
@@ -334,7 +342,12 @@ export class ServicesService {
             orderBy: { createdAt: 'desc' },
         });
 
-        return notifications;
+        // El cuidador ve el nombre del paciente / condición en la notificación,
+        // así que hay que descifrar el service embebido antes de devolverlo.
+        return notifications.map((n) => ({
+            ...n,
+            service: this.encryption.decryptServiceFields(n.service as any),
+        }));
     }
 
     async respondToService(userId: string, serviceId: string, accepted: boolean) {
@@ -365,7 +378,10 @@ export class ServicesService {
             orderBy: { respondedAt: 'desc' },
         });
 
-        return notifications;
+        return notifications.map((n) => ({
+            ...n,
+            service: this.encryption.decryptServiceFields(n.service as any),
+        }));
     }
 
     async startService(userId: string, serviceId: string) {
@@ -377,10 +393,11 @@ export class ServicesService {
         if (service.caregiverId !== caregiver.id) throw new NotFoundException('Not your service');
         if (service.status !== 'accepted') throw new NotFoundException('Service must be accepted to start');
 
-        return this.prisma.service.update({
+        const updated = await this.prisma.service.update({
             where: { id: serviceId },
             data: { status: 'in_progress', actualStart: new Date() },
         });
+        return this.encryption.decryptServiceFields(updated);
     }
 
     async finishService(userId: string, serviceId: string) {
@@ -437,7 +454,7 @@ export class ServicesService {
             }
         }
 
-        return updated;
+        return this.encryption.decryptServiceFields(updated);
     }
 
     private getServiceTypeName(type: string): string {

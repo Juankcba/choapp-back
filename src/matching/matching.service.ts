@@ -5,6 +5,7 @@ import { MatchingGateway } from './matching.gateway';
 import { UsersService } from '../users/users.service';
 import { QueueService } from '../queue/queue.service';
 import { isActiveCaregiver } from '../common/activation';
+import { FieldEncryptionService } from '../common/field-encryption.service';
 
 // Fixed system-wide matching radius. Caregivers whose stored location is within
 // this distance from the service location are notified. `Caregiver.serviceRadius`
@@ -42,6 +43,7 @@ export class MatchingService {
         private matchingGateway: MatchingGateway,
         private usersService: UsersService,
         private queueService: QueueService,
+        private encryption: FieldEncryptionService,
     ) { }
 
     /**
@@ -179,7 +181,7 @@ export class MatchingService {
      * Main matching flow: find caregivers, notify them, create records
      */
     async notifyNearbyCaregivers(serviceId: string): Promise<{ notified: number }> {
-        const service = await this.prisma.service.findUnique({
+        const raw = await this.prisma.service.findUnique({
             where: { id: serviceId },
             include: {
                 family: {
@@ -188,10 +190,12 @@ export class MatchingService {
             },
         });
 
-        if (!service) {
+        if (!raw) {
             this.logger.warn(`Service ${serviceId} not found`);
             return { notified: 0 };
         }
+        // Descifrar patient* antes de armar payloads de notificación (WS/push/email).
+        const service = this.encryption.decryptServiceFields(raw);
 
         const isVirtual = service.modality === 'virtual';
 
@@ -506,10 +510,12 @@ export class MatchingService {
             where: { id: caregiverId },
             include: { user: { select: { email: true, firstName: true, lastName: true, name: true } } },
         });
-        const service = await this.prisma.service.findUnique({
+        const rawService = await this.prisma.service.findUnique({
             where: { id: serviceId },
             include: { family: { include: { user: { select: { firstName: true, lastName: true, name: true } } } } },
         });
+        // Descifrar — el email al cuidador lleva patientName.
+        const service = this.encryption.decryptServiceFields(rawService);
 
         if (caregiver) {
             this.matchingGateway.emitToUser(caregiver.userId, 'service-confirmed', { serviceId });
