@@ -711,6 +711,12 @@ export class AdminService {
                     name: p.service.caregiver.user.name
                         || `${p.service.caregiver.user.firstName ?? ''} ${p.service.caregiver.user.lastName ?? ''}`.trim()
                         || 'Cuidador',
+                    // Datos bancarios para que el admin sepa a dónde transferir
+                    // al momento de liberar el payout. Pueden venir null si el
+                    // cuidador todavía no cargó su CBU — el UI lo debe reflejar.
+                    bankCbu: p.service.caregiver.bankCbu,
+                    bankAlias: p.service.caregiver.bankAlias,
+                    bankName: p.service.caregiver.bankName,
                 }
                 : null,
             family: {
