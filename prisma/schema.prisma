@@ -135,6 +135,12 @@ model Caregiver {
   bankCbu            String?
   bankAlias          String?
   bankName           String?
+  // Esquemas de pago aceptados para servicios virtuales. El cuidador elige
+  // en su onboarding qué acepta. `upfront_full` (el paquete entero de una)
+  // es el default — garantiza ingresos y matchea el comportamiento legacy.
+  // Si también acepta `per_session`, la familia puede pagar sesión por
+  // sesión (sin compromiso por el paquete completo).
+  paymentSchemes     String[] @default(["upfront_full"])
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
@@ -192,6 +198,11 @@ model Service {
   sessionsPerWeek  Int?
   // Array de { dayOfWeek: 0-6, startTime: "HH:MM", durationMin: number }.
   preferredSlots   Json[]
+  // Esquema de pago pactado con el cuidador al seleccionarlo. Valores:
+  //   'upfront_full'  → paga el paquete completo en un checkout.
+  //   'per_session'   → paga cada VideoSession por separado antes del turno.
+  // Presenciales: siempre null (modelo único).
+  paymentScheme    String?
 
   // Service location (where the service is performed, e.g. hospital, patient home)
   serviceAddress     String?
@@ -346,6 +357,20 @@ model VideoSession {
   // re-ejecuta.
   remindedAt24h   DateTime?
   remindedAt15m   DateTime?
+
+  // ─── Pago por sesión (solo relevante cuando Service.paymentScheme = 'per_session') ───
+  // Estado: pending | retenido | released | cancelled. Para upfront_full
+  // queda en 'pending' (el pago global vive en Service) y se ignora al
+  // chequear acceso a la sala.
+  paymentStatus   String    @default("pending")
+  amount          Float?    // bruto de esta sesión (hourlyRate × durationMin/60)
+  netAmount       Float?    // lo que cobra el cuidador después de 10% comisión
+  commissionFamily Float?   // 10% extra que paga la familia
+  mpPreferenceId  String?
+  mpPaymentId     String?
+  paymentReleasedAt DateTime?
+  // Recordatorio al familiar de que tiene que pagar antes del turno.
+  paymentReminderAt DateTime?
 
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt

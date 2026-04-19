@@ -594,6 +594,78 @@ export class CronService {
     }
 
     /**
+     * Cada 15 min: cancela VideoSessions `scheduled` de services con scheme
+     * `per_session` cuyo startAt queda a menos de 24 h y siguen con
+     * `paymentStatus = pending`. El cuidador no bloquea una hora sin plata
+     * a la vista.
+     *
+     * Idempotente: si la sesión ya fue cancelada o pagada, no hace nada.
+     * Notifica a ambas partes (push + websocket) con el motivo
+     * `unpaid_deadline`.
+     */
+    @Cron('*/15 * * * *')
+    async cancelUnpaidUpcomingSessions() {
+        const now = new Date();
+        const in24h = new Date(now.getTime() + 24 * 60 * 60_000);
+
+        try {
+            const unpaid = await this.prisma.videoSession.findMany({
+                where: {
+                    status: 'scheduled',
+                    paymentStatus: 'pending',
+                    startAt: { gte: now, lte: in24h },
+                    service: { paymentScheme: 'per_session' },
+                },
+                select: {
+                    id: true,
+                    serviceId: true,
+                    familyId: true,
+                    caregiverId: true,
+                    startAt: true,
+                },
+            });
+            if (unpaid.length === 0) return;
+
+            for (const s of unpaid) {
+                await this.prisma.videoSession.update({
+                    where: { id: s.id },
+                    data: {
+                        status: 'cancelled',
+                        cancelledBy: 'system',
+                        cancelledReason: 'unpaid_deadline',
+                        paymentStatus: 'cancelled',
+                    },
+                });
+
+                const [family, caregiver] = await Promise.all([
+                    this.prisma.family.findUnique({ where: { id: s.familyId } }),
+                    this.prisma.caregiver.findUnique({ where: { id: s.caregiverId } }),
+                ]);
+
+                const startTxt = s.startAt.toLocaleString('es-AR', {
+                    timeZone: 'America/Argentina/Buenos_Aires',
+                    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+                });
+
+                // Aviso a ambos lados.
+                for (const target of [family?.userId, caregiver?.userId]) {
+                    if (!target) continue;
+                    this.queueService.enqueuePush(
+                        target,
+                        '⚠️ Sesión cancelada (sin pago)',
+                        `La sesión del ${startTxt} se canceló automáticamente porque faltan menos de 24 h y no hay pago.`,
+                        { type: 'video-session-cancelled', videoSessionId: s.id, serviceId: s.serviceId },
+                    ).catch(e => this.logger.error('Push cancel-unpaid failed', e));
+                }
+            }
+
+            this.logger.log(`Cron: auto-canceladas ${unpaid.length} sesiones sin pago en ventana <24h`);
+        } catch (err) {
+            this.logger.error('Cron: Error in cancelUnpaidUpcomingSessions', err);
+        }
+    }
+
+    /**
      * Diario a las 10am: recordá al admin payouts `releasable` hace más de
      * 24h sin liberar. Protege contra el caso de que el aviso original de
      * Telegram se perdió o nadie lo leyó.

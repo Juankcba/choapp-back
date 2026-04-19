@@ -15,6 +15,20 @@ export class PaymentsController {
         return this.paymentsService.createCheckout(serviceId, req.user.userId);
     }
 
+    // Checkout de UNA VideoSession para paquetes en scheme `per_session`.
+    // Cada sesión genera su propia preference de MP.
+    @Post('video-sessions/:id/checkout')
+    @Roles('family')
+    async createVideoSessionCheckout(
+        @Param('id') videoSessionId: string,
+        @Req() req: any,
+    ) {
+        return this.paymentsService.createCheckoutForVideoSession(
+            videoSessionId,
+            req.user.userId,
+        );
+    }
+
     @Post('webhook')
     @Public()
     @HttpCode(200)

@@ -204,6 +204,20 @@ export class CaregiversService {
         if (data.bankCbu !== undefined) mappedData.bankCbu = data.bankCbu;
         if (data.bankAlias !== undefined) mappedData.bankAlias = data.bankAlias;
         if (data.bankName !== undefined) mappedData.bankName = data.bankName;
+        // Validar payment schemes. `upfront_full` siempre está presente (el
+        // sistema no funciona sin al menos uno). Sanitizamos quitando duplicados
+        // y valores fuera del enum.
+        if (data.paymentSchemes !== undefined) {
+            if (!Array.isArray(data.paymentSchemes)) {
+                throw new BadRequestException('paymentSchemes debe ser un array');
+            }
+            const allowed = new Set(['upfront_full', 'per_session']);
+            const clean = Array.from(new Set(
+                data.paymentSchemes.filter((s: unknown) => typeof s === 'string' && allowed.has(s))
+            )) as string[];
+            if (!clean.includes('upfront_full')) clean.unshift('upfront_full');
+            mappedData.paymentSchemes = clean;
+        }
 
         // Snapshot del estado previo para detectar cambios relevantes para el
         // re-matching (cuidador que recién ahora es candidato a un service ya

@@ -241,11 +241,21 @@ export class ServicesService {
                 bio: n.caregiver.bio,
                 specialties: n.caregiver.specialties,
                 certifications: (n.caregiver.certifications || []) as any[],
+                // Esquemas de pago que acepta para servicios virtuales.
+                // La familia elige uno al confirmarlo.
+                paymentSchemes: n.caregiver.paymentSchemes && n.caregiver.paymentSchemes.length > 0
+                    ? n.caregiver.paymentSchemes
+                    : ['upfront_full'],
             },
         }));
     }
 
-    async selectCaregiver(userId: string, serviceId: string, caregiverId: string) {
+    async selectCaregiver(
+        userId: string,
+        serviceId: string,
+        caregiverId: string,
+        paymentScheme?: string,
+    ) {
         const family = await this.prisma.family.findUnique({ where: { userId } });
         if (!family) throw new NotFoundException('Family profile not found');
 
@@ -253,6 +263,34 @@ export class ServicesService {
         if (!service) throw new NotFoundException('Service not found');
         if (service.familyId !== family.id) throw new NotFoundException('Service not found');
         if (service.status !== 'matched') throw new Error('Service is not in matched state');
+
+        // Para virtuales, el pacto incluye el paymentScheme: qué esquema
+        // aceptó la familia entre los que ofrece el cuidador.
+        if (service.modality === 'virtual') {
+            const caregiver = await this.prisma.caregiver.findUnique({
+                where: { id: caregiverId },
+                select: { paymentSchemes: true },
+            });
+            const accepted = (caregiver?.paymentSchemes && caregiver.paymentSchemes.length > 0)
+                ? caregiver.paymentSchemes
+                : ['upfront_full'];
+            // Si la familia no especificó, caemos al primero disponible.
+            // En la práctica el frontend solo permite saltearlo si hay uno solo.
+            const chosen = paymentScheme && accepted.includes(paymentScheme)
+                ? paymentScheme
+                : (accepted.includes('upfront_full') ? 'upfront_full' : accepted[0]);
+
+            if (paymentScheme && !accepted.includes(paymentScheme)) {
+                throw new BadRequestException(
+                    `El cuidador no acepta el esquema de pago "${paymentScheme}"`,
+                );
+            }
+
+            await this.prisma.service.update({
+                where: { id: serviceId },
+                data: { paymentScheme: chosen },
+            });
+        }
 
         const result = await this.matchingService.selectCaregiver(serviceId, caregiverId);
 

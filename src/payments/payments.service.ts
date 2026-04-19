@@ -217,6 +217,202 @@ export class PaymentsService {
     }
 
     /**
+     * Crea una preference de MP para UNA VideoSession puntual (scheme
+     * per_session). Solo la familia dueña del servicio puede pagarla. La
+     * sesión tiene que estar `pending` de pago y el service asociado debe
+     * tener scheme = per_session.
+     *
+     * Retorna el init_point para que el frontend redirija o abra el MP.
+     */
+    async createCheckoutForVideoSession(videoSessionId: string, familyUserId: string) {
+        const session = await this.prisma.videoSession.findUnique({
+            where: { id: videoSessionId },
+        });
+        if (!session) throw new NotFoundException('VideoSession no encontrada');
+        if (session.status === 'cancelled') {
+            throw new BadRequestException('Esta sesión está cancelada');
+        }
+        if (session.paymentStatus === 'retenido' || session.paymentStatus === 'released') {
+            throw new BadRequestException('Esta sesión ya está paga');
+        }
+
+        const service = await this.prisma.service.findUnique({
+            where: { id: session.serviceId },
+            include: {
+                family: { include: { user: true } },
+                caregiver: { include: { user: true } },
+            },
+        });
+        if (!service) throw new NotFoundException('Service not found');
+        if (service.family.userId !== familyUserId) {
+            throw new ForbiddenException('No sos el titular de este servicio');
+        }
+        if (service.paymentScheme !== 'per_session') {
+            throw new BadRequestException(
+                'Este paquete tiene pago upfront; usá /payments/checkout/:serviceId',
+            );
+        }
+
+        const caregiver = service.caregiver;
+        if (!caregiver?.hourlyRate || caregiver.hourlyRate <= 0) {
+            throw new BadRequestException('Caregiver hourly rate not set');
+        }
+
+        // Precio de esta sesión: tarifa del cuidador × duración de la sesión.
+        const durationMin = Math.max(
+            1,
+            Math.round((session.endAt.getTime() - session.startAt.getTime()) / 60_000),
+        );
+        const serviceAmount = caregiver.hourlyRate * (durationMin / 60);
+        const commissionFamily = serviceAmount * this.COMMISSION_RATE;
+        const commissionCarer = serviceAmount * this.COMMISSION_RATE;
+        const netAmount = serviceAmount - commissionCarer;
+        const totalAmount = serviceAmount + commissionFamily;
+
+        const preference = new Preference(this.mpClient);
+        const startTxt = session.startAt.toLocaleString('es-AR', {
+            timeZone: 'America/Argentina/Buenos_Aires',
+            day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+        });
+        const result = await preference.create({
+            body: {
+                items: [{
+                    id: videoSessionId,
+                    title: `Sesión virtual CHO — ${startTxt}`,
+                    description: `${durationMin}min con ${caregiver.user.firstName || 'el profesional'}`,
+                    quantity: 1,
+                    unit_price: Math.round(totalAmount * 100) / 100,
+                    currency_id: 'ARS',
+                }],
+                back_urls: {
+                    success: `${this.frontendUrl}/family/services/${service.id}?payment=success`,
+                    failure: `${this.frontendUrl}/family/services/${service.id}?payment=failure`,
+                    pending: `${this.frontendUrl}/family/services/${service.id}?payment=pending`,
+                },
+                auto_return: 'approved',
+                // Prefijo distingue en el webhook entre service y videoSession.
+                external_reference: `vs:${videoSessionId}`,
+                notification_url: `${this.configService.get('BACKEND_URL') || 'https://choback.bladelink.company'}/api/payments/webhook`,
+                metadata: {
+                    kind: 'video_session',
+                    video_session_id: videoSessionId,
+                    service_id: service.id,
+                    family_user_id: familyUserId,
+                },
+            },
+        });
+
+        // Guardo preferenceId + amounts para reconciliar en el webhook.
+        await this.prisma.videoSession.update({
+            where: { id: videoSessionId },
+            data: {
+                mpPreferenceId: result.id,
+                amount: serviceAmount,
+                netAmount,
+                commissionFamily,
+            },
+        });
+
+        this.logger.log(
+            `MP preference ${result.id} para VideoSession ${videoSessionId}, total: $${totalAmount}`,
+        );
+
+        return {
+            preferenceId: result.id,
+            initPoint: result.init_point,
+            sandboxInitPoint: result.sandbox_init_point,
+            totalAmount,
+            breakdown: {
+                serviceAmount,
+                familyCommission: commissionFamily,
+                carerCommission: commissionCarer,
+                carerReceives: netAmount,
+                total: totalAmount,
+            },
+        };
+    }
+
+    /**
+     * Callback del webhook cuando el pago de una VideoSession fue aprobado
+     * (scheme `per_session`). Marca la sesión como `retenido`, notifica al
+     * cuidador y a la familia (push + websocket), y deja un aviso para el
+     * cuidador de que puede contar con ese ingreso.
+     *
+     * La liberación al cuidador ocurre cuando la sesión pasa a `completed`
+     * — ahí el cron `settleReleasablePayouts` la transiciona a `releasable`
+     * y Telegram avisa al admin.
+     */
+    private async handleVideoSessionPaymentApproved(
+        videoSessionId: string,
+        mpPaymentId: string,
+        paymentMethod: string,
+        transactionAmount: number | null | undefined,
+    ) {
+        const session = await this.prisma.videoSession.findUnique({
+            where: { id: videoSessionId },
+        });
+        if (!session) {
+            this.logger.warn(`Webhook: VideoSession ${videoSessionId} no existe`);
+            return;
+        }
+        if (session.paymentStatus === 'retenido' || session.paymentStatus === 'released') {
+            // Idempotencia — MP puede reenviar webhooks.
+            return;
+        }
+
+        await this.prisma.videoSession.update({
+            where: { id: videoSessionId },
+            data: {
+                paymentStatus: 'retenido',
+                mpPaymentId,
+            },
+        });
+
+        // Crear un ServicePayout por esta sesión con amount = netAmount,
+        // status = pending. El cron de closeExpiredVideoSessions lo pasa a
+        // releasable cuando la sesión queda completed.
+        if (session.netAmount && session.netAmount > 0) {
+            await this.prisma.servicePayout.create({
+                data: {
+                    serviceId: session.serviceId,
+                    weekIndex: 0,
+                    weekStartAt: session.startAt,
+                    weekEndAt: session.endAt,
+                    amount: session.netAmount,
+                    status: 'pending',
+                },
+            });
+        }
+
+        const service = await this.prisma.service.findUnique({
+            where: { id: session.serviceId },
+            include: {
+                family: { include: { user: true } },
+                caregiver: { include: { user: true } },
+            },
+        });
+        if (!service) return;
+
+        if (service.family?.user) {
+            this.matchingGateway.emitToUser(service.family.userId, 'payment-received', {
+                serviceId: service.id,
+                videoSessionId,
+                amount: transactionAmount,
+            });
+        }
+        if (service.caregiver?.user) {
+            this.matchingGateway.emitToUser(service.caregiver.userId, 'payment-received', {
+                serviceId: service.id,
+                videoSessionId,
+                amount: transactionAmount,
+            });
+        }
+        this.logger.log(
+            `VideoSession ${videoSessionId} pagada (MP ${mpPaymentId}, ${paymentMethod}, $${transactionAmount})`,
+        );
+    }
+
+    /**
      * Handles MP payment webhook notifications
      */
     async handleWebhook(body: any) {
@@ -233,6 +429,18 @@ export class PaymentsService {
                 this.logger.log(`Payment ${paymentId}: status=${payment.status}, ref=${payment.external_reference}`);
 
                 if (payment.status === 'approved' && payment.external_reference) {
+                    // Pagos por sesión (per_session scheme) llegan con prefijo
+                    // `vs:<videoSessionId>`. Los manejamos aparte y cortamos acá.
+                    if (payment.external_reference.startsWith('vs:')) {
+                        await this.handleVideoSessionPaymentApproved(
+                            payment.external_reference.slice(3),
+                            paymentId.toString(),
+                            payment.payment_method_id || 'mercadopago',
+                            payment.transaction_amount,
+                        );
+                        return { status: 'ok' };
+                    }
+
                     const serviceId = payment.external_reference;
 
                     const service = await this.prisma.service.update({

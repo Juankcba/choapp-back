@@ -102,9 +102,14 @@ export class ServicesController {
     async selectCaregiver(
         @Req() req: any,
         @Param('id') id: string,
-        @Body() body: { caregiverId: string },
+        @Body() body: { caregiverId: string; paymentScheme?: string },
     ) {
-        return this.servicesService.selectCaregiver(req.user.userId, id, body.caregiverId);
+        return this.servicesService.selectCaregiver(
+            req.user.userId,
+            id,
+            body.caregiverId,
+            body.paymentScheme,
+        );
     }
 
     @Post(':id/start')
