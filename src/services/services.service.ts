@@ -135,7 +135,9 @@ export class ServicesService {
         return this.prisma.service.findMany({
             where: {
                 caregiverId: caregiver.id,
-                status: { in: ['accepted', 'in_progress', 'completed'] },
+                // 'inProgress' (camelCase) se incluye como compat para
+                // services legacy que quedaron con ese typo antes del fix.
+                status: { in: ['accepted', 'in_progress', 'inProgress', 'completed'] },
             },
             include: {
                 family: {
