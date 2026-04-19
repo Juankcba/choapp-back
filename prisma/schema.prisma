@@ -223,6 +223,12 @@ model Service {
   commissionCarer   Float?   // 10%
   netAmount         Float?   // what caregiver receives
   releasedAt        DateTime?
+  // Rate del cuidador congelado al momento de selectCaregiver. Se usa
+  // como fuente de verdad para el cálculo del checkout y del estimado en
+  // el payment history, en vez de releer `caregiver.hourlyRate` actual —
+  // de otro modo, si el cuidador cambia su rate después de ser elegido,
+  // el familiar ve un monto distinto al que efectivamente se le cobró.
+  agreedHourlyRate  Float?
 
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt

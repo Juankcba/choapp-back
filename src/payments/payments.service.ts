@@ -48,12 +48,17 @@ export class PaymentsService {
         if (service.family.userId !== familyUserId) throw new BadRequestException('Not your service');
         if (!service.caregiverId) throw new BadRequestException('No caregiver assigned');
 
-        // Calculate amount from caregiver's hourly rate × service duration
+        // Calcular monto: preferimos el rate pactado (congelado al selectCaregiver)
+        // sobre el actual del cuidador. Si el cuidador cambia `hourlyRate`
+        // entre que lo eligieron y la familia abre el checkout, el pacto
+        // anterior se respeta. Fallback a `hourlyRate` actual para services
+        // legacy sin `agreedHourlyRate` (creados antes del fix).
         const caregiver = await this.prisma.caregiver.findUnique({ where: { id: service.caregiverId } });
-        if (!caregiver?.hourlyRate || caregiver.hourlyRate <= 0) throw new BadRequestException('Caregiver hourly rate not set');
+        const effectiveRate = service.agreedHourlyRate ?? caregiver?.hourlyRate;
+        if (!effectiveRate || effectiveRate <= 0) throw new BadRequestException('Caregiver hourly rate not set');
 
         const duration = service.duration || 1;
-        const serviceAmount = caregiver.hourlyRate * duration;
+        const serviceAmount = effectiveRate * duration;
         const commissionFamily = serviceAmount * this.COMMISSION_RATE;
         const totalAmount = serviceAmount + commissionFamily;
 
@@ -885,12 +890,20 @@ export class PaymentsService {
             });
         }
 
-        // Enrich: calculate estimated amount for services missing it
+        // Enriquecer: estimar monto para services sin `amount` congelado
+        // (ej. accepted sin que la familia haya abierto todavía el checkout).
+        // Usamos `agreedHourlyRate` (congelado al selectCaregiver) en vez de
+        // `caregiver.hourlyRate` actual — si el cuidador cambia su tarifa
+        // después de ser elegido, el estimado que ve la familia sigue
+        // coincidiendo con el rate pactado.
         return services.map(s => {
-            if (!s.amount && s.caregiver?.hourlyRate) {
-                const duration = s.duration || 1;
-                s.amount = s.caregiver.hourlyRate * duration;
-                s.estimatedAmount = true; // flag so UI can show "estimado"
+            if (!s.amount) {
+                const rate = s.agreedHourlyRate ?? s.caregiver?.hourlyRate;
+                if (rate) {
+                    const duration = s.duration || 1;
+                    s.amount = rate * duration;
+                    s.estimatedAmount = true; // flag so UI can show "estimado"
+                }
             }
             return s;
         });
