@@ -847,6 +847,14 @@ export class PaymentsService {
     /**
      * Get payment history for a user (family or caregiver)
      * Includes: paid/retenido/released services AND accepted/confirmed services pending payment
+     *
+     * Fuente de verdad del monto:
+     *  1. Presencial / virtual upfront_full → Service.amount (congelado en createCheckout)
+     *  2. Virtual per_session → suma de VideoSession.amount reales (lo que MP cobró)
+     *  3. Pendiente de cobro → estimado con agreedHourlyRate (rate pactado al
+     *     seleccionar el cuidador). NUNCA caemos a caregiver.hourlyRate vivo
+     *     — eso mostraba montos distintos a lo efectivamente cobrado cuando
+     *     el cuidador cambiaba su tarifa post-selección.
      */
     async getPaymentHistory(userId: string, role: 'family' | 'caregiver') {
         let services: any[];
@@ -864,7 +872,18 @@ export class PaymentsService {
                 },
                 include: {
                     caregiver: {
-                        select: { hourlyRate: true, user: { select: { firstName: true, lastName: true, name: true } } },
+                        select: { user: { select: { firstName: true, lastName: true, name: true } } },
+                    },
+                    // VideoSessions con amounts reales para servicios virtuales
+                    // per_session. En upfront_full quedan todas con amount=null
+                    // y la suma es 0 — en ese caso usamos Service.amount.
+                    videoSessions: {
+                        select: {
+                            amount: true,
+                            netAmount: true,
+                            commissionFamily: true,
+                            paymentStatus: true,
+                        },
                     },
                     reviews: { select: { rating: true, comment: true, reviewType: true, createdAt: true } },
                 },
@@ -883,29 +902,56 @@ export class PaymentsService {
                 },
                 include: {
                     family: { include: { user: { select: { firstName: true, lastName: true, name: true } } } },
-                    caregiver: { select: { hourlyRate: true } },
+                    videoSessions: {
+                        select: {
+                            amount: true,
+                            netAmount: true,
+                            commissionFamily: true,
+                            paymentStatus: true,
+                        },
+                    },
                     reviews: { select: { rating: true, comment: true, reviewType: true, createdAt: true } },
                 },
                 orderBy: { updatedAt: 'desc' },
             });
         }
 
-        // Enriquecer: estimar monto para services sin `amount` congelado
-        // (ej. accepted sin que la familia haya abierto todavía el checkout).
-        // Usamos `agreedHourlyRate` (congelado al selectCaregiver) en vez de
-        // `caregiver.hourlyRate` actual — si el cuidador cambia su tarifa
-        // después de ser elegido, el estimado que ve la familia sigue
-        // coincidiendo con el rate pactado.
         return services.map(s => {
-            if (!s.amount) {
-                const rate = s.agreedHourlyRate ?? s.caregiver?.hourlyRate;
-                if (rate) {
-                    const duration = s.duration || 1;
-                    s.amount = rate * duration;
-                    s.estimatedAmount = true; // flag so UI can show "estimado"
-                }
+            // Descifrar campos sensibles — el resto del flow asume plaintext.
+            const decrypted = this.encryption.decryptServiceFields(s);
+
+            // Virtual per_session: hay VideoSessions con amounts concretos.
+            // Sumamos lo que realmente pasó por MP y pisamos los aggregates
+            // del service. Sessions sin amount (no pagadas todavía) no suman.
+            const vss = decrypted.videoSessions as Array<{
+                amount: number | null;
+                netAmount: number | null;
+                commissionFamily: number | null;
+                paymentStatus: string;
+            }> | undefined;
+            const hasSessionAmounts = vss?.some((v) => v.amount && v.amount > 0);
+
+            if (decrypted.modality === 'virtual' && decrypted.paymentScheme === 'per_session' && hasSessionAmounts) {
+                const sum = (field: 'amount' | 'netAmount' | 'commissionFamily') =>
+                    (vss || []).reduce((acc, v) => acc + (v[field] || 0), 0);
+                decrypted.amount = sum('amount');
+                decrypted.netAmount = sum('netAmount');
+                decrypted.commissionFamily = sum('commissionFamily');
+                decrypted.commissionCarer = decrypted.amount - decrypted.netAmount;
+                return decrypted;
             }
-            return s;
+
+            // Pendiente de checkout: estimar usando SOLO el rate pactado.
+            // Si no hay rate pactado (service legacy sin agreedHourlyRate), no
+            // estimamos — el UI muestra "Pendiente" o 0, pero nunca un monto
+            // que pueda diferir del pactado.
+            if (!decrypted.amount && decrypted.agreedHourlyRate) {
+                const duration = decrypted.duration || 1;
+                decrypted.amount = decrypted.agreedHourlyRate * duration;
+                decrypted.estimatedAmount = true;
+            }
+
+            return decrypted;
         });
     }
 
