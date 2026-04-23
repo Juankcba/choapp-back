@@ -724,13 +724,12 @@ export class AdminService {
                     id: true,
                     serviceType: true,
                     status: true,
-                    paymentStatus: true,
+                    // paymentStatus + amount eliminados del schema (2026-04-19).
                     patientName: true,
                     serviceAddress: true,
                     serviceLocationLat: true,
                     serviceLocationLng: true,
                     duration: true,
-                    amount: true,
                     createdAt: true,
                     family: {
                         include: {

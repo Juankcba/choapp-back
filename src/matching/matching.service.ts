@@ -478,21 +478,14 @@ export class MatchingService {
      * Family selects a caregiver from the interested candidates
      */
     async selectCaregiver(serviceId: string, caregiverId: string) {
-        // Congelar el rate del cuidador en este momento: es el precio
-        // pactado. Si el cuidador cambia `hourlyRate` después, los montos
-        // del checkout y del historial de pagos del familiar siguen
-        // coincidiendo con lo que vio al aceptar.
-        const agreedFrom = await this.prisma.caregiver.findUnique({
-            where: { id: caregiverId },
-            select: { hourlyRate: true },
-        });
-
+        // Ya no congelamos agreedHourlyRate (CHO no intermedia pagos desde
+        // 2026-04-19). La tarifa del cuidador queda como valor referencial
+        // en su perfil; las partes acuerdan el monto final por chat.
         await this.prisma.service.update({
             where: { id: serviceId },
             data: {
                 caregiverId,
                 status: 'accepted',
-                agreedHourlyRate: agreedFrom?.hourlyRate ?? null,
             },
         });
 

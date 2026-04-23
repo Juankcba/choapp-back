@@ -129,18 +129,10 @@ model Caregiver {
   // Legacy field kept during transition — mirrors activationStatus (verified↔active,
   // rejected↔suspended). Will be removed after all clients consume activationStatus.
   verificationStatus String   @default("pending")
-  earningsTotal      Float    @default(0)
-  earningsPending    Float    @default(0)
-  earningsAvailable  Float    @default(0)
-  bankCbu            String?
-  bankAlias          String?
-  bankName           String?
-  // Esquemas de pago aceptados para servicios virtuales. El cuidador elige
-  // en su onboarding qué acepta. `upfront_full` (el paquete entero de una)
-  // es el default — garantiza ingresos y matchea el comportamiento legacy.
-  // Si también acepta `per_session`, la familia puede pagar sesión por
-  // sesión (sin compromiso por el paquete completo).
-  paymentSchemes     String[] @default(["upfront_full"])
+  // Campos de pago eliminados el 2026-04-19: CHO dejó de intermediar pagos.
+  // earningsTotal/Pending/Available, bankCbu/Alias/Name y paymentSchemes ya
+  // no tienen propósito legítimo — ver scripts/wipe_payment_fields.ts para
+  // el cleanup de datos existentes en Atlas.
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
@@ -198,11 +190,6 @@ model Service {
   sessionsPerWeek  Int?
   // Array de { dayOfWeek: 0-6, startTime: "HH:MM", durationMin: number }.
   preferredSlots   Json[]
-  // Esquema de pago pactado con el cuidador al seleccionarlo. Valores:
-  //   'upfront_full'  → paga el paquete completo en un checkout.
-  //   'per_session'   → paga cada VideoSession por separado antes del turno.
-  // Presenciales: siempre null (modelo único).
-  paymentScheme    String?
 
   // Service location (where the service is performed, e.g. hospital, patient home)
   serviceAddress     String?
@@ -213,22 +200,11 @@ model Service {
   locationLat    Float?
   locationLng    Float?
 
-  // Payments
-  amount            Float?
-  paymentMethod     String?
-  paymentStatus     String    @default("pending") // pending | paid | released | refunded
-  mpPaymentId       String?
-  mpPreferenceId    String?
-  commissionFamily  Float?   // 10%
-  commissionCarer   Float?   // 10%
-  netAmount         Float?   // what caregiver receives
-  releasedAt        DateTime?
-  // Rate del cuidador congelado al momento de selectCaregiver. Se usa
-  // como fuente de verdad para el cálculo del checkout y del estimado en
-  // el payment history, en vez de releer `caregiver.hourlyRate` actual —
-  // de otro modo, si el cuidador cambia su rate después de ser elegido,
-  // el familiar ve un monto distinto al que efectivamente se le cobró.
-  agreedHourlyRate  Float?
+  // Campos de pago eliminados el 2026-04-19 (CHO no intermedia pagos):
+  // amount, paymentMethod, paymentStatus, mpPaymentId, mpPreferenceId,
+  // commissionFamily, commissionCarer, netAmount, releasedAt,
+  // agreedHourlyRate, paymentScheme. Ver scripts/wipe_payment_fields.ts
+  // para limpiar los documentos en Atlas.
 
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
@@ -239,42 +215,12 @@ model Service {
   reviews              Review[]
   serviceNotifications ServiceNotification[]
   videoSessions        VideoSession[]
-  payouts              ServicePayout[]
+  // ServicePayout[] eliminado: modelo dropeado el 2026-04-19.
 }
 
-// ─── Service Payouts ───────────────────────────────────
-// Los servicios presenciales generan 1 payout (con amount = netAmount). Los
-// virtuales generan N payouts (uno por semana del paquete) y el admin los
-// libera de a uno cuando se cumplen las sesiones de esa semana. Esto mantiene
-// un audit trail de todas las liberaciones sin romper el flujo existente.
-//
-// Lifecycle: `pending` (sesiones pendientes de ocurrir) → `releasable` (todas
-// las sesiones de la semana están en estado terminal, listo para que el admin
-// libere) → `released` (admin liberó al cuidador vía endpoint).
-model ServicePayout {
-  id          String    @id @default(auto()) @map("_id") @db.ObjectId
-  serviceId   String    @db.ObjectId
-  // 0-based. Para presenciales es siempre 0. Para virtuales va 0..weeks-1.
-  weekIndex   Int
-  // Rango de la semana calendar en la que caen las VideoSessions contadas
-  // para liberar este payout. Para presenciales: null (no aplica).
-  weekStartAt DateTime?
-  weekEndAt   DateTime?
-  // Porción del Service.netAmount que corresponde liberar en este payout.
-  amount      Float
-  // pending | releasable | released
-  status       String    @default("pending")
-  // Momento en que el payout pasó a `releasable`. Sirve para el SLA del admin
-  // (cron diario avisa payouts releasable hace >1 día sin liberar).
-  releasableAt DateTime?
-  releasedAt   DateTime?
-  // Para no duplicar avisos a Telegram. Se setea la primera vez que se notifica.
-  notifiedAt   DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-
-  service Service @relation(fields: [serviceId], references: [id])
-}
+// Modelo ServicePayout eliminado el 2026-04-19 junto con toda la
+// integración de MercadoPago. CHO no retiene ni libera fondos.
+// Ver scripts/wipe_payment_fields.ts para dropear la colección en Atlas.
 
 model Chat {
   id          String    @id @default(auto()) @map("_id") @db.ObjectId
@@ -364,19 +310,10 @@ model VideoSession {
   remindedAt24h   DateTime?
   remindedAt15m   DateTime?
 
-  // ─── Pago por sesión (solo relevante cuando Service.paymentScheme = 'per_session') ───
-  // Estado: pending | retenido | released | cancelled. Para upfront_full
-  // queda en 'pending' (el pago global vive en Service) y se ignora al
-  // chequear acceso a la sala.
-  paymentStatus   String    @default("pending")
-  amount          Float?    // bruto de esta sesión (hourlyRate × durationMin/60)
-  netAmount       Float?    // lo que cobra el cuidador después de 10% comisión
-  commissionFamily Float?   // 10% extra que paga la familia
-  mpPreferenceId  String?
-  mpPaymentId     String?
-  paymentReleasedAt DateTime?
-  // Recordatorio al familiar de que tiene que pagar antes del turno.
-  paymentReminderAt DateTime?
+  // Campos de pago por sesión eliminados el 2026-04-19: CHO no intermedia
+  // pagos. Paquete de campos dropeado: paymentStatus, amount, netAmount,
+  // commissionFamily, mpPreferenceId, mpPaymentId, paymentReleasedAt,
+  // paymentReminderAt. Ver scripts/wipe_payment_fields.ts para cleanup.
 
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
