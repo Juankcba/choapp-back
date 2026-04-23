@@ -28,18 +28,22 @@ export class AdminService {
     ) { }
 
     async getStats() {
-        const [totalUsers, totalCaregivers, totalFamilies, totalServices, activeServices, paidServices, matchedServices] =
+        // `paidServices` quedó como campo legacy: después del retiro de MP
+        // (2026-04-19) CHO no registra el estado de pago. Devolvemos
+        // `completedServices` con la misma clave para no romper el UI
+        // hasta que se haga el cleanup del dashboard.
+        const [totalUsers, totalCaregivers, totalFamilies, totalServices, activeServices, completedServices, matchedServices] =
             await Promise.all([
                 this.prisma.user.count(),
                 this.prisma.caregiver.count(),
                 this.prisma.family.count(),
                 this.prisma.service.count(),
-                this.prisma.service.count({ where: { status: { in: ['pending', 'matched', 'accepted', 'inProgress'] } } }),
-                this.prisma.service.count({ where: { paymentStatus: { in: ['paid', 'retenido'] } } }),
+                this.prisma.service.count({ where: { status: { in: ['pending', 'matched', 'accepted', 'in_progress', 'inProgress'] } } }),
+                this.prisma.service.count({ where: { status: 'completed' } }),
                 this.prisma.service.count({ where: { status: 'matched' } }),
             ]);
 
-        return { totalUsers, totalCaregivers, totalFamilies, totalServices, activeServices, paidServices, matchedServices };
+        return { totalUsers, totalCaregivers, totalFamilies, totalServices, activeServices, paidServices: completedServices, matchedServices };
     }
 
     async getPendingCaregivers() {
@@ -522,52 +526,13 @@ export class AdminService {
     }
 
     /**
-     * Payment stats for admin dashboard
-     */
-    async getPaymentStats() {
-        const services = await this.prisma.service.findMany({
-            where: { paymentStatus: { in: ['paid', 'retenido', 'released'] } },
-            select: {
-                amount: true,
-                commissionFamily: true,
-                commissionCarer: true,
-                netAmount: true,
-                paymentStatus: true,
-            },
-        });
-
-        const totalCollected = services.reduce((sum, s) => sum + (s.amount || 0) + (s.commissionFamily || 0), 0);
-        const totalCommissions = services.reduce((sum, s) => sum + (s.commissionFamily || 0) + (s.commissionCarer || 0), 0);
-        const totalReleased = services.filter(s => s.paymentStatus === 'released').reduce((sum, s) => sum + (s.netAmount || 0), 0);
-        const pendingRelease = services.filter(s => s.paymentStatus === 'retenido' || s.paymentStatus === 'paid').reduce((sum, s) => sum + (s.netAmount || 0), 0);
-
-        return {
-            totalCollected,
-            totalCommissions,
-            totalReleased,
-            pendingRelease,
-            totalPaidServices: services.length,
-        };
-    }
-
-    /**
      * Borrado en cascada de un Service para limpieza administrativa. Útil
-     * cuando un service virtual queda en estado inconsistente (ej: el dueño
-     * cerró una sesión antes de que materializara bien) y hay que partir
-     * de cero para volver a probar el flujo.
+     * cuando un service queda en estado inconsistente y hay que partir de
+     * cero.
      *
-     * NO maneja refunds: si el service tiene paymentStatus='retenido', el
-     * controller frontend tiene que advertir al admin antes de disparar.
-     * Acá solo se ejecuta la limpieza a nivel DB.
-     *
-     * Orden importa por integridad referencial (Mongo no la enforza, pero
-     * dejar huérfanos cuesta plata después):
-     *   1. ServicePayout[]   (dependen de Service)
-     *   2. VideoSession[]    (dependen de Service)
-     *   3. ServiceNotification[] (dependen de Service y Caregiver)
-     *   4. Chat[]            (contienen messages embedded)
-     *   5. Review[]          (dependen de Service y User)
-     *   6. Service
+     * Desde 2026-04-19 ya no existe la colección ServicePayout (CHO no
+     * intermedia pagos). El borrado ahora se limita a VideoSessions,
+     * notifications, chats y reviews asociados.
      */
     async deleteServiceCascade(serviceId: string) {
         const service = await this.prisma.service.findUnique({
@@ -578,23 +543,17 @@ export class AdminService {
                 caregiverId: true,
                 modality: true,
                 status: true,
-                paymentStatus: true,
-                amount: true,
             },
         });
         if (!service) throw new NotFoundException('Service not found');
 
-        // Snapshot previo para el log, por si hace falta auditar después.
         const snapshot = {
             serviceId: service.id,
             modality: service.modality,
             status: service.status,
-            paymentStatus: service.paymentStatus,
-            amount: service.amount,
         };
 
-        const [payouts, videoSessions, notifications, chats, reviews] = await this.prisma.$transaction([
-            this.prisma.servicePayout.deleteMany({ where: { serviceId } }),
+        const [videoSessions, notifications, chats, reviews] = await this.prisma.$transaction([
             this.prisma.videoSession.deleteMany({ where: { serviceId } }),
             this.prisma.serviceNotification.deleteMany({ where: { serviceId } }),
             this.prisma.chat.deleteMany({ where: { serviceId } }),
@@ -605,129 +564,26 @@ export class AdminService {
 
         this.logger.warn(
             `Admin cascade delete for service ${serviceId} — ${JSON.stringify(snapshot)} | ` +
-            `payouts=${payouts.count} videoSessions=${videoSessions.count} ` +
-            `notifications=${notifications.count} chats=${chats.count} reviews=${reviews.count}`,
+            `videoSessions=${videoSessions.count} notifications=${notifications.count} ` +
+            `chats=${chats.count} reviews=${reviews.count}`,
         );
 
-        // Aviso a Telegram para auditoría. Si hubo plata retenida, dejamos
-        // un rastro porque nadie la recuperó automáticamente.
         this.telegramService.sendLog('service.deleted_by_admin', {
             serviceId: service.id,
             modality: service.modality || 'in_person',
             status: service.status,
-            paymentStatus: service.paymentStatus,
-            amount: service.amount != null ? `$${service.amount.toLocaleString('es-AR')}` : '—',
         } as any).catch(() => undefined);
 
         return {
             deleted: true,
             serviceId,
             counts: {
-                payouts: payouts.count,
                 videoSessions: videoSessions.count,
                 notifications: notifications.count,
                 chats: chats.count,
                 reviews: reviews.count,
             },
         };
-    }
-
-    /**
-     * Lista payouts para el admin panel, con info enriquecida de service /
-     * familia / cuidador para poder mostrar todo sin más roundtrips.
-     *
-     * `status` default = "releasable" (lo que el admin va a liberar ahora).
-     * Pasar "all" para traer todos los estados.
-     */
-    async listPayouts(status: string = 'releasable') {
-        const where = status === 'all'
-            ? {}
-            : { status };
-
-        const payouts = await this.prisma.servicePayout.findMany({
-            where,
-            orderBy: [
-                { releasableAt: 'asc' },
-                { weekIndex: 'asc' },
-            ],
-            include: {
-                service: {
-                    include: {
-                        caregiver: {
-                            include: {
-                                user: {
-                                    select: {
-                                        id: true,
-                                        email: true,
-                                        firstName: true,
-                                        lastName: true,
-                                        name: true,
-                                    },
-                                },
-                            },
-                        },
-                        family: {
-                            include: {
-                                user: {
-                                    select: {
-                                        id: true,
-                                        email: true,
-                                        firstName: true,
-                                        lastName: true,
-                                        name: true,
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-            },
-        });
-
-        return payouts.map(p => ({
-            id: p.id,
-            serviceId: p.serviceId,
-            weekIndex: p.weekIndex,
-            weekStartAt: p.weekStartAt,
-            weekEndAt: p.weekEndAt,
-            amount: p.amount,
-            status: p.status,
-            releasableAt: p.releasableAt,
-            releasedAt: p.releasedAt,
-            createdAt: p.createdAt,
-            service: {
-                id: p.service.id,
-                modality: p.service.modality,
-                status: p.service.status,
-                serviceType: p.service.serviceType,
-                specialty: p.service.specialty,
-                patientName: this.encryption.decrypt(p.service.patientName),
-            },
-            caregiver: p.service.caregiver
-                ? {
-                    id: p.service.caregiver.id,
-                    userId: p.service.caregiver.userId,
-                    email: p.service.caregiver.user.email,
-                    name: p.service.caregiver.user.name
-                        || `${p.service.caregiver.user.firstName ?? ''} ${p.service.caregiver.user.lastName ?? ''}`.trim()
-                        || 'Cuidador',
-                    // Datos bancarios para que el admin sepa a dónde transferir
-                    // al momento de liberar el payout. Pueden venir null si el
-                    // cuidador todavía no cargó su CBU — el UI lo debe reflejar.
-                    bankCbu: p.service.caregiver.bankCbu,
-                    bankAlias: p.service.caregiver.bankAlias,
-                    bankName: p.service.caregiver.bankName,
-                }
-                : null,
-            family: {
-                id: p.service.family.id,
-                userId: p.service.family.userId,
-                email: p.service.family.user.email,
-                name: p.service.family.user.name
-                    || `${p.service.family.user.firstName ?? ''} ${p.service.family.user.lastName ?? ''}`.trim()
-                    || 'Familia',
-            },
-        }));
     }
 
     private isValidCoord(lat: number | null | undefined, lng: number | null | undefined): boolean {

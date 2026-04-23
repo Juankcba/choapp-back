@@ -12,7 +12,9 @@ import { ChatModule } from './chat/chat.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { AdminModule } from './admin/admin.module';
 import { MatchingModule } from './matching/matching.module';
-import { PaymentsModule } from './payments/payments.module';
+// PaymentsModule eliminado el 2026-04-19 junto con la integración de
+// MercadoPago. CHO dejó de intermediar pagos: familia y cuidador acuerdan
+// precio y lo gestionan directamente entre ellos.
 import { CronModule } from './cron/cron.module';
 import { BlogModule } from './blog/blog.module';
 import { CareersModule } from './careers/careers.module';
@@ -43,7 +45,6 @@ import { CommonModule } from './common/common.module';
     ReviewsModule,
     AdminModule,
     MatchingModule,
-    PaymentsModule,
     CronModule,
     BlogModule,
     CareersModule,

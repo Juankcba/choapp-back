@@ -165,33 +165,11 @@ export class VideoSessionsService {
         else if (caregiver.user.id === userId) role = 'caregiver';
         else throw new ForbiddenException('No sos parte de esta sesión');
 
-        // Gate de pago según el scheme del service. upfront_full: el service
-        // global tiene que estar pago. per_session: la VideoSession tiene
-        // que estar paga. Sin pago no se emite el JWT a Jitsi.
-        const parentServicePre = await this.prisma.service.findUnique({
-            where: { id: session.serviceId },
-            select: { paymentStatus: true, paymentScheme: true, modality: true },
-        });
-        if (parentServicePre?.modality === 'virtual') {
-            const isPerSession = parentServicePre.paymentScheme === 'per_session';
-            if (isPerSession) {
-                if (session.paymentStatus !== 'retenido' && session.paymentStatus !== 'released') {
-                    throw new BadRequestException(
-                        role === 'family'
-                            ? 'Tenés que pagar esta sesión antes de unirte'
-                            : 'La familia todavía no pagó esta sesión',
-                    );
-                }
-            } else {
-                if (parentServicePre.paymentStatus !== 'retenido' && parentServicePre.paymentStatus !== 'released') {
-                    throw new BadRequestException(
-                        role === 'family'
-                            ? 'El paquete todavía no está pago'
-                            : 'El paquete todavía no está pago por la familia',
-                    );
-                }
-            }
-        }
+        // El gate de paymentStatus se eliminó el 2026-04-19: CHO dejó de
+        // intermediar pagos. Familia y cuidador acuerdan y resuelven el
+        // pago entre ellos, y la entrada a la sala ya no depende de que
+        // haya plata retenida en la plataforma. Si hay conflicto de pago,
+        // es algo que resuelven las partes fuera de CHO.
 
         // Ventana de apertura.
         const now = Date.now();

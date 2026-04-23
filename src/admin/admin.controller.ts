@@ -13,7 +13,6 @@ import {
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminService } from './admin.service';
 import { MailService } from '../mail/mail.service';
-import { PaymentsService } from '../payments/payments.service';
 import { TestersService } from '../testers/testers.service';
 import { Roles } from '../auth/decorators';
 import { RolesGuard } from '../auth/roles.guard';
@@ -25,7 +24,6 @@ export class AdminController {
     constructor(
         private readonly adminService: AdminService,
         private readonly mailService: MailService,
-        private readonly paymentsService: PaymentsService,
         private readonly testersService: TestersService,
     ) { }
 
@@ -229,46 +227,20 @@ export class AdminController {
         return this.adminService.getActivityLog(parseInt(limit || '50'));
     }
 
-    @Get('payments/stats')
-    async getPaymentStats() {
-        return this.adminService.getPaymentStats();
-    }
-
-    @Post('payments/:serviceId/release')
-    async releasePayment(@Param('serviceId') serviceId: string) {
-        return this.paymentsService.releasePayment(serviceId);
-    }
-
-    /**
-     * Lista payouts (semanas o únicos) con info de service/familia/cuidador.
-     * Query param `status`: 'releasable' (default), 'pending', 'released', 'all'.
-     */
-    @Get('payouts')
-    async listPayouts(@Query('status') status?: string) {
-        return this.adminService.listPayouts(status || 'releasable');
-    }
+    // Endpoints de payments / payouts eliminados (2026-04-19): CHO dejó de
+    // intermediar pagos. Familia y cuidador acuerdan monto y transfieren
+    // directamente, sin retención ni liberación vía admin.
 
     /**
      * DELETE /admin/services/:id
      *
-     * Borrado en cascada de un service y todas sus dependencias (payouts,
-     * videoSessions, notifications, chats, reviews). Útil para limpiar un
-     * service virtual que quedó inconsistente durante testing. NO gestiona
-     * refunds — si `paymentStatus` era 'retenido' o 'released', el admin es
-     * responsable de coordinar la devolución fuera de la plataforma.
+     * Borrado en cascada de un service y todas sus dependencias (videoSessions,
+     * notifications, chats, reviews). Útil para limpiar un service que quedó
+     * inconsistente durante testing.
      */
     @Delete('services/:id')
     async deleteService(@Param('id') id: string) {
         return this.adminService.deleteServiceCascade(id);
-    }
-
-    /**
-     * Libera un payout específico (una semana de un paquete virtual o el único
-     * de un presencial). Delegamos a PaymentsService.
-     */
-    @Post('payouts/:payoutId/release')
-    async releasePayout(@Param('payoutId') payoutId: string) {
-        return this.paymentsService.releasePayout(payoutId);
     }
 
     @Post('test-email')
