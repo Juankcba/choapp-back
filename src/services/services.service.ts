@@ -124,6 +124,13 @@ export class ServicesService {
                 caregiver: {
                     include: { user: { select: { firstName: true, lastName: true, image: true } } },
                 },
+                // Reviews embebidos: el screen mobile "Mis Reseñas" consume
+                // esta misma lista para mostrar lo que otros dijeron (o lo
+                // que el familiar ya dijo). Antes venían por PaymentService
+                // que fue eliminado el 2026-04-19.
+                reviews: {
+                    select: { rating: true, comment: true, reviewType: true, createdAt: true },
+                },
             },
             orderBy: { createdAt: 'desc' },
         });
@@ -147,6 +154,9 @@ export class ServicesService {
             include: {
                 family: {
                     include: { user: { select: { firstName: true, lastName: true, name: true, phone: true } } },
+                },
+                reviews: {
+                    select: { rating: true, comment: true, reviewType: true, createdAt: true },
                 },
             },
             orderBy: { updatedAt: 'desc' },
